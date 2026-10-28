@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ModuleFile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-    <UiMod name="EZAssist" version="1.0.1" date="2026-10-28">
+    <UiMod name="EZAssist" version="1.0.2" date="2026-10-28">
         <Author name="Talladego" email="" />
         <Description text="EZAssist: managed /assist macro by KillDamage, Deathblows, then Total Damage in scenarios and party/warband. Bind the EZAssist macro and press it yourself." />
         <VersionSettings gameVersion="1.4.8" windowsVersion="1.0" savedVariablesVersion="1.0" />

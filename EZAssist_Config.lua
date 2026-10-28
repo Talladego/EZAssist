@@ -28,8 +28,8 @@ end
 
 function EZAssistConfig.Initialize()
     local c = c_CONTENTS
-    local version = (EZAssist and EZAssist.VERSION) or "1.0.1"
-    LabelSetText(c_WIN .. "TitleBarText", L"EZAssist v" .. towstring(version))
+    local VERSION = (EZAssist and EZAssist.VERSION) or "1.0.2"
+    LabelSetText(c_WIN .. "TitleBarText", L"EZAssist v" .. towstring(VERSION))
     LabelSetText(c .. "Title", L"EZAssist")
     LabelSetText(c .. "EnabledLabel", L"Enable EZAssist")
     LabelSetText(

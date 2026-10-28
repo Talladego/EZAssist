@@ -1,11 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.0.2 — 2026-10-28
 
 - Notify chat: announce each assist target once until the pick changes (no re-spam on hostile clear / wstring churn)
 - Notify line no longer repeats `EZAssist:` under the `[EZAssist]` tag
 - Defaults for new installs: range `65`, `clearOnHostile` off (existing saved settings unchanged)
 - Slash: `/eza clearhostile` and `/eza glow` (aliases: `clear` / `hostile`, `glowon`)
+- Scenario begin/end, disabling the addon, or turning notify back on clears the last announcement so the current pick can be announced again
+- An open config window follows `/eza notify`, `clearhostile`, `glow`, and `range`, so Okay/Apply does not revert the slash change
 
 ## 1.0.1 — 2026-10-28
 

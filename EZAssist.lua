@@ -7,7 +7,7 @@
 
 EZAssist = EZAssist or {}
 EZAssist.Settings = EZAssist.Settings or {}
-EZAssist.VERSION = "1.0.1"
+EZAssist.VERSION = "1.0.2"
 
 -- Yellow/orange [EZAssist] chat tag; data=EZA: opens config on click.
 local c_CHAT_PREFIX_TEXT = "EZAssist"
@@ -135,6 +135,19 @@ local function ParseOnOff(arg)
     return nil
 end
 
+local function RefreshConfigIfOpen()
+    if type(EZAssistConfig) ~= "table" or type(EZAssistConfig.UpdateFromSettings) ~= "function" then
+        return
+    end
+    if type(DoesWindowExist) ~= "function" or not DoesWindowExist("EZAssistConfig") then
+        return
+    end
+    if type(WindowGetShowing) ~= "function" or not WindowGetShowing("EZAssistConfig") then
+        return
+    end
+    EZAssistConfig.UpdateFromSettings()
+end
+
 local function SlashToggleSetting(key, label, rest)
     local flag = ParseOnOff(rest)
     local s = EZAssist.EnsureSettings()
@@ -144,6 +157,7 @@ local function SlashToggleSetting(key, label, rest)
     end
     s[key] = flag
     EZAssist.OnSettingsChanged()
+    RefreshConfigIfOpen()
     EZAssist.Print(towstring(label) .. L" = " .. (flag and L"on" or L"off"))
 end
 
@@ -191,6 +205,7 @@ function EZAssist.Slash(input)
         s.range = n
         EZAssist.OnSettingsChanged()
         s = EZAssist.EnsureSettings()
+        RefreshConfigIfOpen()
         EZAssist.Print(L"range = " .. towstring(tostring(s.range)))
         return
     end
