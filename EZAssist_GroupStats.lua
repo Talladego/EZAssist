@@ -322,11 +322,17 @@ local function EnsureRpListening()
         if existing == GroupStats.OnPacket or existing == m_rpExclusiveWrap then
             return true
         end
-        m_rpExclusiveOrig = existing
+        -- Already wrapped once. Do not wrap a foreign successor that may call our
+        -- old wrap (shared upvalue reassignment -> stack overflow with other addons).
+        if m_rpExclusiveWrap ~= nil then
+            return true
+        end
+        -- Capture prev in this closure; never read m_rpExclusiveOrig inside the wrap.
+        local prev = existing
+        m_rpExclusiveOrig = prev
         m_rpExclusiveWrap = function(text)
-            local fn = m_rpExclusiveOrig
-            if type(fn) == "function" then
-                fn(text)
+            if type(prev) == "function" then
+                prev(text)
             end
             GroupStats.OnPacket(text)
         end
@@ -343,9 +349,12 @@ local function EnsureRpListening()
             if type(fn) == "function" and fn ~= GroupStats.OnPacket then
                 m_rpWrapTable = existing
                 m_rpWrapKey = key
-                m_rpWrapOrig = fn
+                local prev = fn
+                m_rpWrapOrig = prev
                 existing[key] = function(text)
-                    m_rpWrapOrig(text)
+                    if type(prev) == "function" then
+                        prev(text)
+                    end
                     GroupStats.OnPacket(text)
                 end
                 return true

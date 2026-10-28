@@ -2,6 +2,7 @@
 
 ## 1.0.2 — 2026-10-28
 
+- Fix GRP_STATS packet wrap stack overflow when another addon also chains `ror_PacketHandling.RP`
 - Notify chat: announce each assist target once until the pick changes (no re-spam on hostile clear / wstring churn)
 - Notify line no longer repeats `EZAssist:` under the `[EZAssist]` tag
 - Defaults for new installs: range `65`, `clearOnHostile` off (existing saved settings unchanged)
