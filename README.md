@@ -26,6 +26,8 @@ Extracted from [CustomUI](https://github.com/Talladego/CustomUIv3) SmartAssist. 
 | `/eza help` | Help |
 | `/eza on` / `off` | Enable / disable |
 | `/eza range <1-500>` | Assist range (ft) |
+| `/eza clearhostile on\|off` | Clear macro while hostile targeted |
+| `/eza glow on\|off` | Glow on new assist available |
 | `/eza notify on\|off` | Chat when pick changes |
 | `/eza status` | Diagnostics |
 

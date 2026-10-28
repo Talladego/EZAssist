@@ -9,7 +9,7 @@ local c_WIN = "EZAssistConfig"
 local c_CONTENTS = "EZAssistConfigContentsScrollChildSettings"
 
 local function ClampRange(n)
-    n = tonumber(n) or 100
+    n = tonumber(n) or ((EZAssist and EZAssist.DEFAULT_RANGE) or 65)
     if n < 1 then
         n = 1
     elseif n > 500 then
@@ -57,7 +57,7 @@ function EZAssistConfig.UpdateFromSettings()
     local c = c_CONTENTS
     local s = EnsureSettings()
     ButtonSetPressedFlag(c .. "EnabledButton", s.enabled == true)
-    ButtonSetPressedFlag(c .. "ClearHostileButton", s.clearOnHostile ~= false)
+    ButtonSetPressedFlag(c .. "ClearHostileButton", s.clearOnHostile == true)
     ButtonSetPressedFlag(c .. "GlowButton", s.glowOnNewAssist ~= false)
     ButtonSetPressedFlag(c .. "NotifyButton", s.notify == true)
     if DoesWindowExist(c .. "RangeEdit") then
