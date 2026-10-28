@@ -7,7 +7,9 @@
 # - Tag v* publishes that version when the tag matches EZAssist.mod, and
 #   refreshes the moving "latest" tag the same way.
 # Version tags older than the newest 10 are deleted.
-# Return of Reckoning upload runs when ROR_TOKEN is set and the addon page exists.
+# Return of Reckoning upload runs when ROR_TOKEN is set. A 404 on the public
+# release URL means that version is new and should be posted; the addon page
+# itself stays 404 until the first release is approved, so it is not pre-checked.
 name: Release addon zip
 
 on:

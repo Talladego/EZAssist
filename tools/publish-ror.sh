@@ -34,7 +34,6 @@ if [[ ! -f "$ZIP" ]]; then
 fi
 
 api_base="https://addons.returnofreckoning.com/api/v1/addons/ezassist/releases"
-addon_url="https://addons.returnofreckoning.com/api/v1/addons/ezassist"
 version_enc=$(VERSION="$VERSION" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["VERSION"], safe=""))')
 release_url="${api_base}/${version_enc}"
 status_prefix="${release_url}/status"
@@ -77,25 +76,6 @@ auth_config="${tmp}/curl-auth.cfg"
   printf 'header = "Authorization: Bearer %s"\n' "$escaped" > "$auth_config"
 )
 chmod 600 "$auth_config"
-
-addon_body="${tmp}/addon.json"
-addon_err="${tmp}/addon.err"
-set +e
-addon_code=$(curl -sS --fail-with-body --proto '=https' --max-redirs 2 --retry 3 --retry-delay 2 \
-  --connect-timeout 20 --max-time 60 \
-  -o "$addon_body" -w "%{http_code}" "$addon_url" 2>"$addon_err")
-addon_rc=$?
-set -e
-if [[ "$addon_code" == "404" ]]; then
-  echo "::warning::Return of Reckoning has no ezassist addon page yet (HTTP 404); skipping upload."
-  exit 0
-fi
-if [[ "$addon_rc" -ne 0 || "$addon_code" != "200" ]]; then
-  echo "Addon page check for ezassist returned HTTP ${addon_code} (curl ${addon_rc})" >&2
-  cat "$addon_err" >&2
-  cat "$addon_body" >&2
-  exit 1
-fi
 
 exist_body="${tmp}/exist.json"
 exist_err="${tmp}/exist.err"
@@ -227,6 +207,15 @@ if [[ "$upload_rc" -eq 0 && "$upload_code" == "202" ]]; then
   fi
   echo "Addon site accepted ${VERSION} (HTTP ${upload_code}). Polling pipeline status."
   poll_release
+fi
+
+# The public addon page stays 404 until the first release is approved. A 404
+# from POST is not that case; with a token it should be 202.
+if [[ "$upload_code" == "404" ]]; then
+  echo "::error::POST ${api_base} returned HTTP 404; refusing to treat that as a skipped upload." >&2
+  cat "$upload_err" >&2
+  cat "$upload_body" >&2
+  exit 1
 fi
 
 # A conflict means the public GET missed an unpublished release (failed checks,
