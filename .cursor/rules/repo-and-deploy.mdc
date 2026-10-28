@@ -1,0 +1,16 @@
+---
+description: Edit EZAssist git clone; deploy runtime files to live RoR AddOns
+alwaysApply: true
+---
+
+# Repo vs live AddOns
+
+- **Source of truth:** `C:\Users\talla\Documents\GitHub\EZAssist` (git clone). Edit, commit, and review here only.
+- **Live game folder:** `C:\Users\talla\Games\Return of Reckoning\Interface\AddOns\EZAssist` is a **runtime deploy target**, not a working tree. Do not edit live files directly; do not leave `.git` / docs / backup clutter there.
+- After meaningful code changes, deploy with:
+
+```powershell
+.\tools\deploy.ps1
+```
+
+  Optional: `-WhatIf`, `-Dest "…"`. Copies `EZAssist.mod` / Lua / XML / `media\` and prunes extras under the destination.

@@ -1,0 +1,13 @@
+# Backup/copy files
+* - Copy*
+_*.lua
+
+# OS metadata
+Desktop.ini
+Thumbs.db
+.DS_Store
+
+# Lua editor backup files
+*.lua~
+*.lua.bak
+*.lua.old
