@@ -1,0 +1,322 @@
+# Build an installable EZAssist zip (runtime addon files only) and publish it.
+# - Pull requests pack the zip and upload a workflow artifact.
+# - Push to master/main, or a manual run, publishes vX.Y.Z (marked Latest) and
+#   refreshes the moving "latest" tag as a normal release when that zip is new.
+#   workflow_dispatch always refreshes the moving tag.
+# - Tag v* publishes that version when the tag matches EZAssist.mod, and
+#   refreshes the moving "latest" tag the same way.
+# Version tags older than the newest 10 are deleted.
+# Return of Reckoning addon upload runs only when ROR_TOKEN is configured.
+name: Release addon zip
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release-addon-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lua 5.1 syntax check
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+          tmp=$(mktemp -d)
+          files=(
+            EZAssist.lua
+            EZAssist_Controller.lua
+            EZAssist_Config.lua
+            EZAssist_GroupStats.lua
+            EZAssist_ScenarioStats.lua
+          )
+          for f in "${files[@]}"; do
+            # WAR wstring literals (L"...") are not valid Lua 5.1. Check a rewritten copy.
+            sed -E 's/L"([^"]*)"/"\1"/g' "$f" > "$tmp/$f"
+            luac5.1 -p "$tmp/$f"
+          done
+
+      - name: Pack addon zip
+        id: pack
+        shell: pwsh
+        run: ./tools/pack.ps1 -OutDir dist
+
+      - name: Extract release notes
+        id: notes
+        shell: bash
+        env:
+          VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          export LC_ALL=C.UTF-8
+          if [[ -z "${VERSION:-}" ]]; then
+            echo "Pack step did not output a version" >&2
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing non MAJOR.MINOR.PATCH version: ${VERSION}" >&2
+            exit 1
+          fi
+
+          mkdir -p dist
+          install_line='Unzip into `Interface/AddOns/` so you get `Interface/AddOns/EZAssist/`.'
+          section=""
+          status=0
+          if [[ -f CHANGELOG.md ]]; then
+            ver_re=$(printf '%s' "$VERSION" | sed -e 's/[.[\*^$()+?{|\\]/\\&/g')
+            header_re="^##[[:space:]]+${ver_re}([[:space:]]+—|[[:space:]]+-|[[:space:]]*\$)"
+            set +e
+            section=$(awk -v header_re="$header_re" '
+              BEGIN { found = 0; printing = 0 }
+              {
+                if ($0 ~ /^##[[:space:]]+/) {
+                  if (printing) {
+                    exit 0
+                  }
+                  if ($0 ~ header_re) {
+                    found = 1
+                    printing = 1
+                    print
+                    next
+                  }
+                } else if (printing) {
+                  print
+                }
+              }
+              END { if (!found) exit 2 }
+            ' CHANGELOG.md)
+            status=$?
+            set -e
+            if [[ "$status" -ne 0 && "$status" -ne 2 ]]; then
+              echo "Failed to read CHANGELOG.md (exit ${status})" >&2
+              exit 1
+            fi
+            if [[ "$status" -eq 2 ]]; then
+              section=""
+            fi
+          fi
+
+          if [[ -z "${section//[[:space:]]/}" ]]; then
+            echo "CHANGELOG.md has no section for ${VERSION}; using default install instructions."
+            body=$(printf '## %s\n\nInstallable EZAssist addon zip.' "$VERSION")
+          else
+            body=$(printf '%s\n' "$section" | sed -e 's/[[:space:]]*$//')
+            echo "Extracted CHANGELOG.md section for ${VERSION}."
+          fi
+
+          {
+            printf '%s\n\n%s\n' "$body" "$install_line"
+          } > dist/release-notes.md
+          cp dist/release-notes.md dist/ror-changelog.md
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EZAssist-addon
+          path: dist/EZAssist-*.zip
+          if-no-files-found: error
+
+      - name: Publish versioned release and keep 10 version tags
+        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.pack.outputs.version }}
+          ZIP: ${{ steps.pack.outputs.zip_path }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${VERSION:-}" || -z "${ZIP:-}" ]]; then
+            echo "Pack step did not output version and zip_path" >&2
+            exit 1
+          fi
+          tag="v${VERSION}"
+          zip_name="EZAssist-${VERSION}.zip"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$ZIP" --clobber
+            gh release edit "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "EZAssist ${VERSION}" \
+              --latest \
+              --notes-file dist/release-notes.md
+          else
+            gh release create "$tag" "$ZIP" \
+              --target "$GITHUB_SHA" \
+              --title "EZAssist ${VERSION}" \
+              --latest \
+              --notes-file dist/release-notes.md
+          fi
+
+          skip_latest=0
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
+            existing=""
+            if existing=$(gh release view latest --json assets --jq '.assets[].name' 2>/dev/null); then
+              if printf '%s\n' "$existing" | grep -Fxq "$zip_name"; then
+                echo "latest already has ${zip_name}; skipping recreate"
+                skip_latest=1
+              fi
+            fi
+          fi
+          if [[ "$skip_latest" -eq 0 ]]; then
+            gh release delete latest --yes --cleanup-tag || true
+            git push origin :refs/tags/latest 2>/dev/null || true
+            gh release create latest "$ZIP" \
+              --target "$GITHUB_SHA" \
+              --title "EZAssist Latest (${VERSION})" \
+              --latest=false \
+              --notes-file dist/release-notes.md
+          fi
+
+          gh release list --limit 100 --json tagName,publishedAt \
+            --jq '[.[] | select(.tagName | startswith("v"))] | sort_by(.publishedAt) | reverse | .[10:] | .[].tagName' \
+            | while IFS= read -r old; do
+                [ -n "$old" ] || continue
+                if [[ "$old" == "$tag" ]]; then
+                  continue
+                fi
+                gh release delete "$old" --yes --cleanup-tag
+              done
+
+      - name: Publish versioned release on tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.pack.outputs.version }}
+          ZIP: ${{ steps.pack.outputs.zip_path }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${VERSION:-}" || -z "${ZIP:-}" ]]; then
+            echo "Pack step did not output version and zip_path" >&2
+            exit 1
+          fi
+          ref_ver="${GITHUB_REF_NAME#v}"
+          if [[ "$ref_ver" != "$VERSION" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match EZAssist.mod version ${VERSION} (expected v${VERSION})" >&2
+            exit 1
+          fi
+          tag="v${VERSION}"
+          zip_name="EZAssist-${VERSION}.zip"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$ZIP" --clobber
+            gh release edit "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "EZAssist ${VERSION}" \
+              --latest \
+              --notes-file dist/release-notes.md
+          else
+            gh release create "$tag" "$ZIP" \
+              --target "$GITHUB_SHA" \
+              --title "EZAssist ${VERSION}" \
+              --latest \
+              --notes-file dist/release-notes.md
+          fi
+
+          skip_latest=0
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
+            existing=""
+            if existing=$(gh release view latest --json assets --jq '.assets[].name' 2>/dev/null); then
+              if printf '%s\n' "$existing" | grep -Fxq "$zip_name"; then
+                echo "latest already has ${zip_name}; skipping recreate"
+                skip_latest=1
+              fi
+            fi
+          fi
+          if [[ "$skip_latest" -eq 0 ]]; then
+            gh release delete latest --yes --cleanup-tag || true
+            git push origin :refs/tags/latest 2>/dev/null || true
+            gh release create latest "$ZIP" \
+              --target "$GITHUB_SHA" \
+              --title "EZAssist Latest (${VERSION})" \
+              --latest=false \
+              --notes-file dist/release-notes.md
+          fi
+
+      - name: Upload to Return of Reckoning addon site
+        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          ROR_TOKEN: ${{ secrets.ROR_TOKEN }}
+          VERSION: ${{ steps.pack.outputs.version }}
+          ZIP: ${{ steps.pack.outputs.zip_path }}
+        run: |
+          set +x
+          set -euo pipefail
+          if [[ -z "${ROR_TOKEN:-}" ]]; then
+            echo "ROR_TOKEN is not configured; skipping Return of Reckoning addon upload."
+            exit 0
+          fi
+          if [[ -z "${VERSION:-}" || -z "${ZIP:-}" || ! -f "$ZIP" ]]; then
+            echo "Pack step did not produce a zip to upload" >&2
+            exit 1
+          fi
+          if [[ ! -s dist/ror-changelog.md ]]; then
+            echo "Missing dist/ror-changelog.md" >&2
+            exit 1
+          fi
+
+          if [[ "$ROR_TOKEN" == *$'\n'* || "$ROR_TOKEN" == *$'\r'* ]]; then
+            echo "ROR_TOKEN contains a newline; refusing to upload" >&2
+            exit 1
+          fi
+
+          api="https://addons.returnofreckoning.com/api/v1/addons/ezassist/releases"
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          # Curl reads the bearer token from this file, not from argv.
+          auth="${tmp}/curl-auth.cfg"
+          (
+            umask 077
+            escaped="$ROR_TOKEN"
+            escaped=${escaped//\\/\\\\}
+            escaped=${escaped//\"/\\\"}
+            printf 'header = "Authorization: Bearer %s"\n' "$escaped" > "$auth"
+          )
+          chmod 600 "$auth"
+          exist_body="${tmp}/exist.json"
+          set +e
+          code=$(curl -sS --proto '=https' --max-redirs 2 \
+            --connect-timeout 20 --max-time 60 \
+            -K "$auth" \
+            -o "$exist_body" -w "%{http_code}" \
+            "${api}/${VERSION}")
+          rc=$?
+          set -e
+          if [[ "$rc" -ne 0 ]]; then
+            echo "Existence check for ${VERSION} failed (curl ${rc})" >&2
+            exit 1
+          fi
+          if [[ "$code" == "200" ]]; then
+            echo "Release ${VERSION} is already published on the Return of Reckoning addon site; skipping upload."
+            exit 0
+          fi
+          if [[ "$code" != "404" ]]; then
+            echo "Existence check for ${VERSION} returned HTTP ${code}" >&2
+            cat "$exist_body" >&2
+            exit 1
+          fi
+
+          echo "Addon site has no ${VERSION} release yet; uploading."
+          curl -sS --fail-with-body --proto '=https' --max-redirs 0 \
+            --connect-timeout 20 --max-time 120 \
+            -K "$auth" \
+            -F "file=@${ZIP};type=application/zip" \
+            -F "changelog_md=<dist/ror-changelog.md" \
+            "$api"
+          echo
+          echo "Uploaded EZAssist ${VERSION} to the Return of Reckoning addon site."
