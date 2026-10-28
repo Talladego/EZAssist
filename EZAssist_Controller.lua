@@ -16,7 +16,7 @@ local SmartAssist = EZAssist
 
 SmartAssist.MACRO_NAME = "EZAssist"
 SmartAssist.ICON_ACTIVE = 23166 -- Unshakable Focus; always used (glow = unacked new pick)
-SmartAssist.DEFAULT_RANGE = 100
+SmartAssist.DEFAULT_RANGE = 65
 SmartAssist.RANGE_MIN = 1
 SmartAssist.RANGE_MAX = 500
 -- ActionButton overlay index for the career burn glow (same as EZGuard).
@@ -45,7 +45,7 @@ local DEFAULT_SETTINGS = {
     enabled = true,
     range = SmartAssist.DEFAULT_RANGE,
     notify = false,
-    clearOnHostile = true,
+    clearOnHostile = false,
     glowOnNewAssist = true,
 }
 
@@ -53,6 +53,8 @@ local m_handlersRegistered = false
 local m_statsHeld = false
 local m_macroSlot = nil
 local m_lastAssistName = nil -- wstring or nil
+local m_lastAssistKey = nil -- cached NormalizeNameKey(m_lastAssistName)
+local m_lastNotifyKey = nil -- normalized name; survives hostile clear so we do not re-spam
 local m_fullSlotsWarned = false
 local m_distCache = {} -- [nameKey] = { index, rawName, distance }
 local m_scanCursor = 1
@@ -62,7 +64,7 @@ local m_stickyHoldLeft = 0
 -- Cached from EnsureSettings / Sync so OnUpdate and events do no settings work.
 local m_enabled = false
 local m_notify = false
-local m_clearOnHostile = true
+local m_clearOnHostile = false
 local m_glowEnabled = true
 local m_boundSettings = nil
 -- Events set these. OnUpdate is what ranks players and rewrites the macro.
@@ -77,6 +79,7 @@ local m_playerRowByKey = {}
 local m_glowOn = false
 local m_glowClearPending = false
 local m_glowAckName = nil -- wstring; last pick the player pressed the macro for
+local m_glowAckKey = nil -- cached NormalizeNameKey(m_glowAckName)
 local m_stockActionButtonOnLButtonUp = nil
 local m_glowActionButtonWrapper = nil
 local m_glowHookInstalled = false
@@ -92,7 +95,7 @@ end
 local function RememberSettings(settings)
     m_enabled = settings.enabled == true
     m_notify = settings.notify == true
-    m_clearOnHostile = settings.clearOnHostile ~= false
+    m_clearOnHostile = settings.clearOnHostile == true
     m_glowEnabled = settings.glowOnNewAssist ~= false
 end
 
@@ -136,7 +139,7 @@ function SmartAssist.EnsureSettings()
     AssignIfChanged(settings, "range", range)
     AssignIfChanged(settings, "enabled", settings.enabled == true)
     AssignIfChanged(settings, "notify", settings.notify == true)
-    AssignIfChanged(settings, "clearOnHostile", settings.clearOnHostile ~= false)
+    AssignIfChanged(settings, "clearOnHostile", settings.clearOnHostile == true)
     AssignIfChanged(settings, "glowOnNewAssist", settings.glowOnNewAssist ~= false)
     settings.autoAssist = nil -- removed; RoR ignores /assist via SendChatText
     RememberSettings(settings)
@@ -172,6 +175,22 @@ local function NormalizeNameKey(name)
         return nil
     end
     return string.lower(s)
+end
+
+local function SetLastAssistName(name)
+    m_lastAssistName = name
+    m_lastAssistKey = NormalizeNameKey(name)
+end
+
+local function SetGlowAckName(name)
+    m_glowAckName = name
+    m_glowAckKey = NormalizeNameKey(name)
+end
+
+-- Press ack copies the cached key. Do not normalize the stored name again.
+local function AckGlowForLastAssist()
+    m_glowAckName = m_lastAssistName
+    m_glowAckKey = m_lastAssistKey
 end
 
 local function StripForAssist(name)
@@ -536,10 +555,11 @@ end
 local function FormatAssistNotifyLine(assistName, picked)
     local icon = CareerIconMarkup(picked and picked.row)
     local detail = FormatAssistNotifyDetail(picked)
+    -- Body only; EZAssist.Print already prefixes [EZAssist].
     if detail ~= nil and detail ~= L"" then
-        return L"EZAssist: assisting " .. icon .. assistName .. L" (" .. detail .. L")"
+        return L"assisting " .. icon .. assistName .. L" (" .. detail .. L")"
     end
-    return L"EZAssist: assisting " .. icon .. assistName
+    return L"assisting " .. icon .. assistName
 end
 
 local function ClearSticky()
@@ -798,7 +818,7 @@ function SmartAssist.DebugStatus()
         enabled = settings.enabled == true,
         range = settings.range,
         notify = settings.notify == true,
-        clearOnHostile = settings.clearOnHostile ~= false,
+        clearOnHostile = settings.clearOnHostile == true,
         glowOnNewAssist = settings.glowOnNewAssist ~= false,
         inScenario = IsScenarioContext(),
         inPartyOrWarband = IsPartyOrWarband(),
@@ -966,7 +986,7 @@ local function ApplyPendingGlowClear()
         return
     end
     m_glowClearPending = false
-    m_glowAckName = m_lastAssistName
+    AckGlowForLastAssist()
     SetMacroGlow(false)
 end
 
@@ -1036,9 +1056,10 @@ local function DeleteMacroAndClearBars()
         end
     end
     m_macroSlot = nil
-    m_lastAssistName = nil
+    SetLastAssistName(nil)
+    m_lastNotifyKey = nil
     m_glowOn = false
-    m_glowAckName = nil
+    SetGlowAckName(nil)
     m_glowClearPending = false
 end
 
@@ -1074,8 +1095,8 @@ end
 local function SuppressAssistForHostile()
     m_assistSuppressed = true
     ClearSticky()
-    m_lastAssistName = nil
-    m_glowAckName = nil
+    SetLastAssistName(nil)
+    SetGlowAckName(nil)
     m_glowClearPending = false
     WriteMacro(nil)
     SetMacroGlow(false)
@@ -1089,8 +1110,9 @@ local function ClearAssistOutsideContext()
     m_updateElapsed = 0
     HoldStatsStream(false)
     ClearSticky()
-    m_lastAssistName = nil
-    m_glowAckName = nil
+    SetLastAssistName(nil)
+    m_lastNotifyKey = nil
+    SetGlowAckName(nil)
     m_glowClearPending = false
     WriteMacro(nil)
     SetMacroGlow(false)
@@ -1151,37 +1173,40 @@ local function RefreshAssist()
 
     m_assistSuppressed = false
     local assistName, picked = SmartAssist.PickAssistTarget()
-    local changed = (assistName == nil and m_lastAssistName ~= nil)
-        or (assistName ~= nil and (m_lastAssistName == nil or m_lastAssistName ~= assistName))
+    local newKey = NormalizeNameKey(assistName)
+    -- Key compare uses the cached key. Raw wstring ~= can fire every tick for the same player.
+    local changed = newKey ~= m_lastAssistKey
 
     WriteMacro(assistName)
-    m_lastAssistName = assistName
+    SetLastAssistName(assistName)
 
-    if assistName ~= nil and assistName ~= L"" then
+    if assistName ~= nil and assistName ~= L"" and newKey ~= nil then
         -- Glow only for an unacked pick (new assist ready). Press acks and clears deferred.
         if changed then
-            m_glowAckName = nil
+            SetGlowAckName(nil)
             if m_glowEnabled then
                 SetMacroGlow(true)
             else
                 SetMacroGlow(false)
             end
-            if m_notify == true then
-                EZAssist.Print(FormatAssistNotifyLine(assistName, picked))
-            end
         elseif not m_glowEnabled then
             if m_glowOn then
                 SetMacroGlow(false)
             end
-        elseif m_glowAckName ~= nil and m_glowAckName == assistName then
+        elseif m_glowAckKey ~= nil and m_glowAckKey == newKey then
             if m_glowOn then
                 SetMacroGlow(false)
             end
         elseif not m_glowOn then
             SetMacroGlow(true)
         end
+        -- Notify once per player until a different ally is picked (hostile clear does not re-spam).
+        if m_notify == true and newKey ~= m_lastNotifyKey then
+            EZAssist.Print(FormatAssistNotifyLine(assistName, picked))
+            m_lastNotifyKey = newKey
+        end
     else
-        m_glowAckName = nil
+        SetGlowAckName(nil)
         SetMacroGlow(false)
     end
 end
@@ -1280,7 +1305,8 @@ end
 
 function SmartAssist.OnScenarioBegin()
     ClearSticky()
-    m_lastAssistName = nil
+    SetLastAssistName(nil)
+    m_lastNotifyKey = nil
     m_assistSuppressed = false
     if m_enabled ~= true then
         return
@@ -1297,7 +1323,8 @@ end
 
 function SmartAssist.OnScenarioEnd()
     ClearSticky()
-    m_lastAssistName = nil
+    SetLastAssistName(nil)
+    m_lastNotifyKey = nil
     HoldStatsStream(false)
     if m_enabled ~= true then
         return
@@ -1453,7 +1480,12 @@ function SmartAssist.Disable()
 end
 
 function SmartAssist.Sync()
+    local notifyWasOn = m_notify == true
     local settings = SmartAssist.EnsureSettings()
+    -- Turning notifications back on should be allowed to announce the current pick.
+    if settings.notify == true and not notifyWasOn then
+        m_lastNotifyKey = nil
+    end
     if settings.enabled == true then
         RegisterHandlers()
         local slot = FindOwnedMacroSlot()
@@ -1474,7 +1506,8 @@ function SmartAssist.Sync()
         m_updateElapsed = 0
         HoldStatsStream(false)
         ClearSticky()
-        m_lastAssistName = nil
+        SetLastAssistName(nil)
+        m_lastNotifyKey = nil
         -- Prefer the cached slot, same as before, so a stale index is what Disable clears.
         -- One name lookup: Delete uses m_macroSlot and does not scan again.
         local found = FindOwnedMacroSlot()

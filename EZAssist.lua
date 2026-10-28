@@ -7,7 +7,7 @@
 
 EZAssist = EZAssist or {}
 EZAssist.Settings = EZAssist.Settings or {}
-EZAssist.VERSION = "1.0.1"
+EZAssist.VERSION = "1.0.2"
 
 -- Yellow/orange [EZAssist] chat tag; data=EZA: opens config on click.
 local c_CHAT_PREFIX_TEXT = "EZAssist"
@@ -109,7 +109,9 @@ local function PrintHelp()
     EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" - KD>DB>TD assist macro")
     EZAssist.Print(L"/ezassist or /ezass - open config")
     EZAssist.Print(L"/eza on|off - enable / disable (creates or deletes the EZAssist macro)")
-    EZAssist.Print(L"/eza range <1-500> - assist range in feet (default 100)")
+    EZAssist.Print(L"/eza range <1-500> - assist range in feet (default 65)")
+    EZAssist.Print(L"/eza clearhostile on|off - clear macro while you have a living hostile")
+    EZAssist.Print(L"/eza glow on|off - glow when a new assist is available")
     EZAssist.Print(L"/eza notify on|off - chat when the assist target changes")
     EZAssist.Print(L"/eza status - diagnostic snapshot")
     EZAssist.Print(L"Bind the EZAssist macro and press it yourself (RoR ignores /assist from addons).")
@@ -131,6 +133,32 @@ local function ParseOnOff(arg)
         return false
     end
     return nil
+end
+
+local function RefreshConfigIfOpen()
+    if type(EZAssistConfig) ~= "table" or type(EZAssistConfig.UpdateFromSettings) ~= "function" then
+        return
+    end
+    if type(DoesWindowExist) ~= "function" or not DoesWindowExist("EZAssistConfig") then
+        return
+    end
+    if type(WindowGetShowing) ~= "function" or not WindowGetShowing("EZAssistConfig") then
+        return
+    end
+    EZAssistConfig.UpdateFromSettings()
+end
+
+local function SlashToggleSetting(key, label, rest)
+    local flag = ParseOnOff(rest)
+    local s = EZAssist.EnsureSettings()
+    if flag == nil then
+        EZAssist.Print(towstring(label) .. L" = " .. (s[key] and L"on" or L"off"))
+        return
+    end
+    s[key] = flag
+    EZAssist.OnSettingsChanged()
+    RefreshConfigIfOpen()
+    EZAssist.Print(towstring(label) .. L" = " .. (flag and L"on" or L"off"))
 end
 
 function EZAssist.Slash(input)
@@ -177,19 +205,20 @@ function EZAssist.Slash(input)
         s.range = n
         EZAssist.OnSettingsChanged()
         s = EZAssist.EnsureSettings()
+        RefreshConfigIfOpen()
         EZAssist.Print(L"range = " .. towstring(tostring(s.range)))
         return
     end
+    if cmd == "clearhostile" or cmd == "clear" or cmd == "hostile" then
+        SlashToggleSetting("clearOnHostile", "clearhostile", rest)
+        return
+    end
+    if cmd == "glow" or cmd == "glowon" then
+        SlashToggleSetting("glowOnNewAssist", "glow", rest)
+        return
+    end
     if cmd == "notify" then
-        local flag = ParseOnOff(rest)
-        local s = EZAssist.EnsureSettings()
-        if flag == nil then
-            EZAssist.Print(L"notify = " .. (s.notify and L"on" or L"off"))
-            return
-        end
-        s.notify = flag
-        EZAssist.OnSettingsChanged()
-        EZAssist.Print(L"notify = " .. (flag and L"on" or L"off"))
+        SlashToggleSetting("notify", "notify", rest)
         return
     end
     if cmd == "status" or cmd == "debug" then
