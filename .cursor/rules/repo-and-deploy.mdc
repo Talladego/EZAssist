@@ -13,4 +13,4 @@ alwaysApply: true
 .\tools\deploy.ps1
 ```
 
-  Optional: `-WhatIf`, `-Dest "…"`. Copies `EZAssist.mod` / Lua / XML / `media\` and prunes extras under the destination.
+  Optional: `-WhatIf`, `-Dest "…"`. Copies `EZAssist.mod` / Lua / XML and prunes extras under the destination.

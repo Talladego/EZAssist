@@ -5,7 +5,7 @@
 -- KillDamage → Deathblows → Total Damage. Never assists self.
 -- Scenario rows: EZAssist.ScenarioStats / GetScenarioPlayers.
 -- Party/warband: GRP_STATS packets (EZAssist.GroupStats; not RoRGroupScoreboard).
--- Only sets an assist when you have no hostile target; clears the macro while you do.
+-- Optional clearOnHostile: clears the macro while you have a living hostile target.
 -- Enable creates the macro; disable deletes it and clears bar slots.
 -- Bind and press the macro yourself — RoR ignores /assist from SendChatText.
 ----------------------------------------------------------------
@@ -15,11 +15,15 @@ EZAssist = EZAssist or {}
 local SmartAssist = EZAssist
 
 SmartAssist.MACRO_NAME = "EZAssist"
-SmartAssist.ICON_ACTIVE = 23166
-SmartAssist.ICON_DISABLED = 91210
+SmartAssist.ICON_ACTIVE = 23166 -- Unshakable Focus; always used (glow = unacked new pick)
 SmartAssist.DEFAULT_RANGE = 100
 SmartAssist.RANGE_MIN = 1
 SmartAssist.RANGE_MAX = 500
+-- ActionButton overlay index for the career burn glow (same as EZGuard).
+local c_GLOW_ANIM = 6
+local c_GLOW_LEVEL = 2
+-- Glow = new assist pick ready. Clears deferred after the macro is pressed (never
+-- inside ActionButton.OnLButtonUp — that path can drop hotbar /assist).
 
 local c_DISTANCE_FIX = 1 / 1.06
 local c_MAX_MAP_POINTS = 511
@@ -41,6 +45,8 @@ local DEFAULT_SETTINGS = {
     enabled = true,
     range = SmartAssist.DEFAULT_RANGE,
     notify = false,
+    clearOnHostile = true,
+    glowOnNewAssist = true,
 }
 
 local m_handlersRegistered = false
@@ -56,6 +62,8 @@ local m_stickyHoldLeft = 0
 -- Cached from EnsureSettings / Sync so OnUpdate and events do no settings work.
 local m_enabled = false
 local m_notify = false
+local m_clearOnHostile = true
+local m_glowEnabled = true
 local m_boundSettings = nil
 -- Events set these. OnUpdate is what ranks players and rewrites the macro.
 local m_dirty = false
@@ -65,6 +73,13 @@ local m_assistSuppressed = false
 local m_inAssistWork = false
 -- Reused across picks so a refresh does not allocate a new index table.
 local m_playerRowByKey = {}
+-- Glow ack: press sets pending; OnUpdate clears glow and remembers the pick name.
+local m_glowOn = false
+local m_glowClearPending = false
+local m_glowAckName = nil -- wstring; last pick the player pressed the macro for
+local m_stockActionButtonOnLButtonUp = nil
+local m_glowActionButtonWrapper = nil
+local m_glowHookInstalled = false
 
 local function ScenarioStats()
     return EZAssist.ScenarioStats
@@ -77,6 +92,8 @@ end
 local function RememberSettings(settings)
     m_enabled = settings.enabled == true
     m_notify = settings.notify == true
+    m_clearOnHostile = settings.clearOnHostile ~= false
+    m_glowEnabled = settings.glowOnNewAssist ~= false
 end
 
 --- Fill missing keys on `current`. Does not allocate when every default is already present.
@@ -119,6 +136,8 @@ function SmartAssist.EnsureSettings()
     AssignIfChanged(settings, "range", range)
     AssignIfChanged(settings, "enabled", settings.enabled == true)
     AssignIfChanged(settings, "notify", settings.notify == true)
+    AssignIfChanged(settings, "clearOnHostile", settings.clearOnHostile ~= false)
+    AssignIfChanged(settings, "glowOnNewAssist", settings.glowOnNewAssist ~= false)
     settings.autoAssist = nil -- removed; RoR ignores /assist via SendChatText
     RememberSettings(settings)
     return settings
@@ -693,11 +712,42 @@ function SmartAssist.PickAssistTarget(opts)
     return nil
 end
 
-local function FindMacroSlotByName(macroName, macros)
+local c_MACRO_NAME_PREFIX = towstring(SmartAssist.MACRO_NAME)
+local c_MACRO_NAME_OPEN = c_MACRO_NAME_PREFIX .. L" ("
+local c_MACRO_NAME_OPEN_LEN = string.len(SmartAssist.MACRO_NAME .. " (")
+
+--- True for "EZAssist" or "EZAssist (<player>)".
+local function IsOwnedMacroName(name)
+    if name == nil or name == L"" then
+        return false
+    end
+    if name == c_MACRO_NAME_PREFIX then
+        return true
+    end
+    if type(wstring) == "table" and type(wstring.sub) == "function" then
+        return wstring.sub(name, 1, c_MACRO_NAME_OPEN_LEN) == c_MACRO_NAME_OPEN
+    end
+    local asString = name
+    if type(name) == "wstring" and type(WStringToString) == "function" then
+        asString = WStringToString(name)
+    else
+        asString = tostring(name)
+    end
+    return type(asString) == "string"
+        and string.sub(asString, 1, c_MACRO_NAME_OPEN_LEN) == (SmartAssist.MACRO_NAME .. " (")
+end
+
+local function FormatMacroDisplayName(assistName)
+    if assistName == nil or assistName == L"" then
+        return c_MACRO_NAME_PREFIX
+    end
+    return c_MACRO_NAME_PREFIX .. L" (" .. assistName .. L")"
+end
+
+local function FindOwnedMacroSlot(macros)
     macros = macros or GetMacrosTable()
-    local expected = towstring(macroName)
     for i = 1, #macros do
-        if macros[i] and macros[i].name == expected then
+        if macros[i] and IsOwnedMacroName(macros[i].name) then
             return i
         end
     end
@@ -723,7 +773,7 @@ end
 function SmartAssist.DebugStatus()
     local settings = SmartAssist.EnsureSettings()
     local macros = GetMacrosTable()
-    local slot = FindMacroSlotByName(SmartAssist.MACRO_NAME)
+    local slot = FindOwnedMacroSlot()
     local row = slot and macros[slot]
     local aliveByKey = BuildAliveByKey()
     local aliveCount = 0
@@ -748,6 +798,8 @@ function SmartAssist.DebugStatus()
         enabled = settings.enabled == true,
         range = settings.range,
         notify = settings.notify == true,
+        clearOnHostile = settings.clearOnHostile ~= false,
+        glowOnNewAssist = settings.glowOnNewAssist ~= false,
         inScenario = IsScenarioContext(),
         inPartyOrWarband = IsPartyOrWarband(),
         assistContext = IsAssistContext(),
@@ -794,8 +846,133 @@ local function ForEachMacroActionButton(macroSlot, fn)
     end
 end
 
+local function GlowTextureBase()
+    if GameData
+        and GameData.Realm
+        and GameData.Player
+        and GameData.Player.realm == GameData.Realm.ORDER
+    then
+        return "anim_fury_"
+    end
+    return "anim_waaagh_"
+end
+
+--- EZGuard-style ActionButton burn glow (m_Windows[6]).
+local function SetButtonGlow(button, glowLevel)
+    if not button or type(button.m_Windows) ~= "table" then
+        return
+    end
+    local glowFrame = button.m_Windows[c_GLOW_ANIM]
+    if glowFrame == nil then
+        return
+    end
+    if glowLevel and glowLevel > 0 then
+        if type(glowFrame.StopAnimation) == "function" then
+            glowFrame:StopAnimation(true)
+        end
+        if type(glowFrame.SetAnimationTexture) == "function" then
+            glowFrame:SetAnimationTexture(GlowTextureBase() .. tostring(glowLevel))
+        end
+        if type(glowFrame.StartAnimation) == "function" then
+            glowFrame:StartAnimation(0, true, false, 0)
+        end
+        if type(glowFrame.Show) == "function" then
+            glowFrame:Show(true)
+        end
+    else
+        if type(glowFrame.StopAnimation) == "function" then
+            glowFrame:StopAnimation(true)
+        end
+        if type(glowFrame.Show) == "function" then
+            glowFrame:Show(false)
+        end
+    end
+end
+
+local function SetMacroGlow(want)
+    want = want == true and m_glowEnabled == true
+    local slot = m_macroSlot
+    if slot == nil then
+        m_glowOn = false
+        return
+    end
+    m_glowOn = want
+    local level = want and c_GLOW_LEVEL or 0
+    ForEachMacroActionButton(slot, function(button)
+        SetButtonGlow(button, level)
+    end)
+end
+
+--- Thin click wrapper: flag only + tail-call stock handler. No glow/WriteMacro here.
+local function InstallGlowPressHook()
+    if m_glowHookInstalled and m_glowActionButtonWrapper ~= nil and m_stockActionButtonOnLButtonUp ~= nil then
+        return
+    end
+    if type(ActionButton) ~= "table" or type(ActionButton.OnLButtonUp) ~= "function" then
+        return
+    end
+    m_stockActionButtonOnLButtonUp = ActionButton.OnLButtonUp
+    m_glowActionButtonWrapper = function(self, flags, x, y)
+        local nextFn = m_stockActionButtonOnLButtonUp
+        local slot = m_macroSlot
+        local doMacro = GameData and GameData.PlayerActions and GameData.PlayerActions.DO_MACRO
+        -- Field reads + one boolean assign only. Then tail-call so /assist stays clean.
+        if self
+            and slot ~= nil
+            and doMacro ~= nil
+            and self.m_ActionType == doMacro
+            and self.m_ActionId == slot
+            and (Cursor == nil or Cursor.Data == nil)
+        then
+            m_glowClearPending = true
+        end
+        if nextFn then
+            return nextFn(self, flags, x, y)
+        end
+    end
+    ActionButton.OnLButtonUp = m_glowActionButtonWrapper
+    m_glowHookInstalled = true
+end
+
+local function UninstallGlowPressHook()
+    if not m_glowHookInstalled then
+        return
+    end
+    if type(ActionButton) == "table"
+        and ActionButton.OnLButtonUp == m_glowActionButtonWrapper
+        and m_stockActionButtonOnLButtonUp ~= nil
+    then
+        ActionButton.OnLButtonUp = m_stockActionButtonOnLButtonUp
+        m_glowActionButtonWrapper = nil
+        m_stockActionButtonOnLButtonUp = nil
+    end
+    m_glowHookInstalled = false
+    m_glowClearPending = false
+end
+
+local function SyncGlowPressHook()
+    if m_enabled == true and m_glowEnabled == true and m_handlersRegistered then
+        InstallGlowPressHook()
+    else
+        UninstallGlowPressHook()
+        if m_glowOn then
+            SetMacroGlow(false)
+        end
+    end
+end
+
+local function ApplyPendingGlowClear()
+    if not m_glowClearPending then
+        return
+    end
+    m_glowClearPending = false
+    m_glowAckName = m_lastAssistName
+    SetMacroGlow(false)
+end
+
 local function ClearMacroFromActionBars(macroSlot)
     ForEachMacroActionButton(macroSlot, function(button)
+        SetButtonGlow(button, 0)
         if type(button.SetActionData) == "function" then
             button:SetActionData(0, 0)
         end
@@ -806,12 +983,12 @@ local function WriteMacro(assistName)
     if type(SetMacroData) ~= "function" then
         return false
     end
-    local name = towstring(SmartAssist.MACRO_NAME)
+    -- Tooltip shows the macro name; include the assist target when set.
+    local name = FormatMacroDisplayName(assistName)
     local text = L""
-    local icon = SmartAssist.ICON_DISABLED
+    local icon = SmartAssist.ICON_ACTIVE
     if assistName ~= nil and assistName ~= L"" then
         text = L"/assist " .. assistName
-        icon = SmartAssist.ICON_ACTIVE
     end
 
     -- One macro-table read for the slot search. The equality check below uses
@@ -821,7 +998,7 @@ local function WriteMacro(assistName)
     local macros = nil
     if slot == nil then
         macros = GetMacrosTable()
-        slot = FindMacroSlotByName(SmartAssist.MACRO_NAME, macros)
+        slot = FindOwnedMacroSlot(macros)
         if slot == nil then
             slot = FindEmptyMacroSlot(macros)
         end
@@ -851,7 +1028,7 @@ local function WriteMacro(assistName)
 end
 
 local function DeleteMacroAndClearBars()
-    local slot = m_macroSlot or FindMacroSlotByName(SmartAssist.MACRO_NAME)
+    local slot = m_macroSlot or FindOwnedMacroSlot()
     if slot ~= nil then
         ClearMacroFromActionBars(slot)
         if type(SetMacroData) == "function" then
@@ -860,6 +1037,9 @@ local function DeleteMacroAndClearBars()
     end
     m_macroSlot = nil
     m_lastAssistName = nil
+    m_glowOn = false
+    m_glowAckName = nil
+    m_glowClearPending = false
 end
 
 local function HoldStatsStream(want)
@@ -895,7 +1075,10 @@ local function SuppressAssistForHostile()
     m_assistSuppressed = true
     ClearSticky()
     m_lastAssistName = nil
+    m_glowAckName = nil
+    m_glowClearPending = false
     WriteMacro(nil)
+    SetMacroGlow(false)
 end
 
 local function ClearAssistOutsideContext()
@@ -907,7 +1090,10 @@ local function ClearAssistOutsideContext()
     HoldStatsStream(false)
     ClearSticky()
     m_lastAssistName = nil
+    m_glowAckName = nil
+    m_glowClearPending = false
     WriteMacro(nil)
+    SetMacroGlow(false)
     local GS = GroupStats()
     if GS ~= nil and type(GS.Clear) == "function" and not IsPartyOrWarband() then
         GS.Clear()
@@ -957,9 +1143,8 @@ local function RefreshAssist()
         end
     end
 
-    -- Never set (and always clear) assist while you have a living hostile target.
-    -- Always WriteMacro(nil) so a stale post-/reload macro cannot linger.
-    if HasHostileTarget() then
+    -- Optional: never set (and always clear) assist while you have a living hostile.
+    if m_clearOnHostile and HasHostileTarget() then
         SuppressAssistForHostile()
         return
     end
@@ -972,10 +1157,32 @@ local function RefreshAssist()
     WriteMacro(assistName)
     m_lastAssistName = assistName
 
-    if changed and assistName ~= nil then
-        if m_notify == true then
-            EZAssist.Print(FormatAssistNotifyLine(assistName, picked))
+    if assistName ~= nil and assistName ~= L"" then
+        -- Glow only for an unacked pick (new assist ready). Press acks and clears deferred.
+        if changed then
+            m_glowAckName = nil
+            if m_glowEnabled then
+                SetMacroGlow(true)
+            else
+                SetMacroGlow(false)
+            end
+            if m_notify == true then
+                EZAssist.Print(FormatAssistNotifyLine(assistName, picked))
+            end
+        elseif not m_glowEnabled then
+            if m_glowOn then
+                SetMacroGlow(false)
+            end
+        elseif m_glowAckName ~= nil and m_glowAckName == assistName then
+            if m_glowOn then
+                SetMacroGlow(false)
+            end
+        elseif not m_glowOn then
+            SetMacroGlow(true)
         end
+    else
+        m_glowAckName = nil
+        SetMacroGlow(false)
     end
 end
 
@@ -1017,10 +1224,12 @@ local function UnregisterHandlers()
         end
     end
     m_handlersRegistered = false
+    SyncGlowPressHook()
 end
 
 local function RegisterHandlers()
     if m_handlersRegistered then
+        SyncGlowPressHook()
         return
     end
     local E = SystemData and SystemData.Events
@@ -1058,6 +1267,7 @@ local function RegisterHandlers()
         RegisterEventHandler(E.BATTLEGROUP_MEMBER_UPDATED, "EZAssist.OnGroupUpdated")
     end
     m_handlersRegistered = true
+    SyncGlowPressHook()
 end
 
 function SmartAssist.OnScenarioStatsUpdated()
@@ -1149,6 +1359,9 @@ end
 --- Sticky hold ticks every frame while enabled. Ranking stays on c_REFRESH_INTERVAL.
 --- Disabled: return before any settings read or allocation.
 function SmartAssist.OnUpdate(timePassed)
+    -- Glow clear is deferred from the click wrapper (safe for /assist).
+    ApplyPendingGlowClear()
+
     if m_enabled ~= true then
         return
     end
@@ -1172,14 +1385,14 @@ function SmartAssist.OnUpdate(timePassed)
 
     if m_targetDirty then
         m_targetDirty = false
-        if HasHostileTarget() then
+        if m_clearOnHostile and HasHostileTarget() then
             -- Clear on this update so the macro does not keep /assist through a target swap.
             -- Later target events while the hostile is still up do not touch the macro.
             if not m_assistSuppressed then
                 SuppressAssistForHostile()
             end
         elseif m_assistSuppressed then
-            -- Dropped the hostile: rank once on this update, then the normal interval resumes.
+            -- Dropped the hostile (or clearOnHostile turned off): rank once, then resume.
             m_assistSuppressed = false
             MarkAssistDirtyNow()
         end
@@ -1218,7 +1431,7 @@ function SmartAssist.Enable()
     m_targetDirty = false
     m_updateElapsed = 0
     RegisterHandlers()
-    m_macroSlot = FindMacroSlotByName(SmartAssist.MACRO_NAME)
+    m_macroSlot = FindOwnedMacroSlot()
     WriteMacro(nil)
     RefreshAssist()
 end
@@ -1243,12 +1456,13 @@ function SmartAssist.Sync()
     local settings = SmartAssist.EnsureSettings()
     if settings.enabled == true then
         RegisterHandlers()
-        local slot = FindMacroSlotByName(SmartAssist.MACRO_NAME)
+        local slot = FindOwnedMacroSlot()
         m_macroSlot = slot or m_macroSlot
         if slot == nil then
             WriteMacro(nil)
         end
         m_updateElapsed = 0
+        SyncGlowPressHook()
         RefreshAssist()
     else
         UnregisterHandlers()
@@ -1263,7 +1477,7 @@ function SmartAssist.Sync()
         m_lastAssistName = nil
         -- Prefer the cached slot, same as before, so a stale index is what Disable clears.
         -- One name lookup: Delete uses m_macroSlot and does not scan again.
-        local found = FindMacroSlotByName(SmartAssist.MACRO_NAME)
+        local found = FindOwnedMacroSlot()
         if m_macroSlot == nil then
             m_macroSlot = found
         end
@@ -1294,6 +1508,7 @@ function SmartAssist.Shutdown()
     m_targetDirty = false
     m_dirty = false
     m_inAssistWork = false
+    m_glowClearPending = false
     UnregisterHandlers()
     HoldStatsStream(false)
     local GS = GroupStats()

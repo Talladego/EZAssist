@@ -1,6 +1,5 @@
 # Deploy only runtime addon files from this repo to the live RoR AddOns folder.
-# Copies: EZAssist.mod + Lua/XML + media\
-# Removes anything else under Dest (.git, docs, README, etc.).
+# Copies: EZAssist.mod + Lua/XML. Removes anything else under Dest (.git, docs, README, etc.).
 #
 # Usage:
 #   .\tools\deploy.ps1
@@ -23,14 +22,13 @@ $RootFiles = @(
     "EZAssist.mod",
     "EZAssist.lua",
     "EZAssist_Controller.lua",
+    "EZAssist_Config.lua",
+    "EZAssistConfig.xml",
     "EZAssist_GroupStats.lua",
-    "EZAssist_ScenarioStats.lua",
-    "EZAssist_Icons.xml"
+    "EZAssist_ScenarioStats.lua"
 )
 
-$RuntimeDirs = @(
-    "media"
-)
+$RuntimeDirs = @()
 
 function Test-IsReparsePoint {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -85,7 +83,11 @@ if (Test-IsReparsePoint -Path $Dest) {
 
 Write-Host "Repo:   $RepoRoot"
 Write-Host "Dest:   $Dest"
-Write-Host ("Copy:   " + ($RootFiles -join ", ") + " + " + (($RuntimeDirs | ForEach-Object { "$_\" }) -join " "))
+$copyLabel = ($RootFiles -join ", ")
+if ($RuntimeDirs.Count -gt 0) {
+    $copyLabel = $copyLabel + " + " + (($RuntimeDirs | ForEach-Object { "$_\" }) -join " ")
+}
+Write-Host ("Copy:   " + $copyLabel)
 
 if (-not $PSCmdlet.ShouldProcess($Dest, "Deploy runtime addon files and prune extras")) {
     exit 0

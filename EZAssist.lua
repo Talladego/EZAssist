@@ -1,35 +1,117 @@
 ----------------------------------------------------------------
 -- EZAssist
--- Standalone KillDamage → Deathblows → Total Damage /assist macro
+-- Standalone KillDamage > Deathblows > Total Damage /assist macro
 -- (extracted from CustomUI SmartAssist).
--- Slash: /eza | /ezassist
+-- Slash: /eza | /ezassist | /ezass
 ----------------------------------------------------------------
 
 EZAssist = EZAssist or {}
 EZAssist.Settings = EZAssist.Settings or {}
-EZAssist.VERSION = "1.0.0"
+EZAssist.VERSION = "1.0.1"
 
-local CHAT_PREFIX = L"[EZAssist] "
+-- Yellow/orange [EZAssist] chat tag; data=EZA: opens config on click.
+local c_CHAT_PREFIX_TEXT = "EZAssist"
+local c_CHAT_PREFIX_COLOR = { 255, 180, 60 }
+local c_CHAT_LINK_DATA = "EZA:"
+local c_CHAT_LINK_TAG = L"EZA:"
+
+local m_prevOnHyperLinkLButtonUp = nil
+local m_chatLinkHooked = false
+
+local function GetChatPrefixWString(includeSpace)
+    local coloredPartRaw = string.format(
+        "<LINK data=\"%s\" color=\"%d,%d,%d\" text=\"%s\">",
+        c_CHAT_LINK_DATA,
+        c_CHAT_PREFIX_COLOR[1],
+        c_CHAT_PREFIX_COLOR[2],
+        c_CHAT_PREFIX_COLOR[3],
+        c_CHAT_PREFIX_TEXT
+    )
+    local prefix = L"[" .. towstring(coloredPartRaw) .. L"]"
+    if includeSpace then
+        prefix = prefix .. L" "
+    end
+    return prefix
+end
 
 function EZAssist.Print(msg)
     if msg == nil then
         return
     end
+    local line = GetChatPrefixWString(true) .. towstring(msg)
+    local filter = SystemData and SystemData.SystemLogFilters and SystemData.SystemLogFilters.GENERAL or 0
     if type(EA_ChatWindow) == "table" and type(EA_ChatWindow.Print) == "function" then
-        EA_ChatWindow.Print(CHAT_PREFIX .. towstring(msg))
+        EA_ChatWindow.Print(line, filter)
         return
     end
     if type(TextLogAddEntry) == "function" then
-        TextLogAddEntry("Chat", 0, CHAT_PREFIX .. towstring(msg))
+        TextLogAddEntry("System", filter, line)
     end
 end
 
+function EZAssist.ShowConfig()
+    if type(EZAssistConfig) == "table" and type(EZAssistConfig.Show) == "function" then
+        EZAssistConfig.Show()
+        return
+    end
+    EZAssist.Print(L"Config window is not available.")
+end
+
+local function IsEZAssistChatLink(linkData)
+    if linkData == nil or type(wstring) ~= "table" or type(wstring.gsub) ~= "function" then
+        return false
+    end
+    local data = linkData
+    if type(data) ~= "wstring" then
+        data = towstring(tostring(data))
+    end
+    local _, findCount = wstring.gsub(data, c_CHAT_LINK_TAG, L"")
+    return (tonumber(findCount) or 0) > 0
+end
+
+local function OnEZAssistHyperLinkLButtonUp(linkData, flags, x, y)
+    if IsEZAssistChatLink(linkData) then
+        EZAssist.ShowConfig()
+        return
+    end
+    if m_prevOnHyperLinkLButtonUp then
+        m_prevOnHyperLinkLButtonUp(linkData, flags, x, y)
+    end
+end
+
+local function InstallChatLinkHook()
+    if m_chatLinkHooked then
+        return
+    end
+    if type(EA_ChatWindow) ~= "table" or type(EA_ChatWindow.OnHyperLinkLButtonUp) ~= "function" then
+        return
+    end
+    m_prevOnHyperLinkLButtonUp = EA_ChatWindow.OnHyperLinkLButtonUp
+    EA_ChatWindow.OnHyperLinkLButtonUp = OnEZAssistHyperLinkLButtonUp
+    m_chatLinkHooked = true
+end
+
+local function UninstallChatLinkHook()
+    if not m_chatLinkHooked then
+        return
+    end
+    if type(EA_ChatWindow) == "table"
+        and EA_ChatWindow.OnHyperLinkLButtonUp == OnEZAssistHyperLinkLButtonUp
+        and m_prevOnHyperLinkLButtonUp ~= nil
+    then
+        EA_ChatWindow.OnHyperLinkLButtonUp = m_prevOnHyperLinkLButtonUp
+    end
+    m_prevOnHyperLinkLButtonUp = nil
+    m_chatLinkHooked = false
+end
+
 local function PrintHelp()
-    EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" — KD→DB→TD assist macro")
-    EZAssist.Print(L"/eza on|off — enable / disable (creates or deletes the EZAssist macro)")
-    EZAssist.Print(L"/eza range <1-500> — assist range in feet (default 100)")
-    EZAssist.Print(L"/eza notify on|off — chat when the assist target changes")
-    EZAssist.Print(L"/eza status — diagnostic snapshot")
+    EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" - KD>DB>TD assist macro")
+    EZAssist.Print(L"/ezassist or /ezass - open config")
+    EZAssist.Print(L"/eza on|off - enable / disable (creates or deletes the EZAssist macro)")
+    EZAssist.Print(L"/eza range <1-500> - assist range in feet (default 100)")
+    EZAssist.Print(L"/eza notify on|off - chat when the assist target changes")
+    EZAssist.Print(L"/eza status - diagnostic snapshot")
     EZAssist.Print(L"Bind the EZAssist macro and press it yourself (RoR ignores /assist from addons).")
 end
 
@@ -57,8 +139,16 @@ function EZAssist.Slash(input)
         text = WStringToString(text)
     end
     text = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if text == "" or text == "help" or text == "?" then
+    if text == "" then
+        EZAssist.ShowConfig()
+        return
+    end
+    if text == "help" or text == "?" then
         PrintHelp()
+        return
+    end
+    if text == "config" or text == "settings" or text == "options" then
+        EZAssist.ShowConfig()
         return
     end
 
@@ -142,25 +232,29 @@ local function RegisterSlash()
         LibSlash.RegisterSlashCmd("ezassist", function(args)
             EZAssist.Slash(args)
         end)
+        LibSlash.RegisterSlashCmd("ezass", function(args)
+            EZAssist.Slash(args)
+        end)
     end
 end
 
 --- Mod OnInitialize entry (controller Initialize is also available).
---- Mod OnInitialize. Controller provides Initialize / OnUpdate / Shutdown.
 function EZAssist.OnInitialize()
     RegisterSlash()
+    InstallChatLinkHook()
     if type(EZAssist.Initialize) == "function" then
         EZAssist.Initialize()
     end
     local s = EZAssist.EnsureSettings and EZAssist.EnsureSettings() or EZAssist.Settings
     if s and s.enabled == true then
-        EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" ready — /eza help")
+        EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" ready - /ezassist")
     else
-        EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" loaded (disabled) — /eza on")
+        EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" loaded (disabled) - /ezassist")
     end
 end
 
 function EZAssist.OnShutdown()
+    UninstallChatLinkHook()
     if type(EZAssist.Shutdown) == "function" then
         EZAssist.Shutdown()
     end

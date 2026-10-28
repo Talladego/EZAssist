@@ -1,51 +1,40 @@
 # EZAssist
 
-Standalone Return of Reckoning addon: one managed hotbar macro (`EZAssist`) that becomes `/assist <player>` for the best nearby ally by **KillDamage → Deathblows → Total Damage**.
+Standalone Return of Reckoning addon: one managed hotbar macro `/assist <player>` for the best nearby ally by **KillDamage → Deathblows → Total Damage**.
 
-Extracted from [CustomUI](https://github.com/Talladego/CustomUIv3) SmartAssist.
+Extracted from [CustomUI](https://github.com/Talladego/CustomUIv3) SmartAssist. Do **not** run both at once.
 
 ## Features
 
-- **Scenarios / sieges** — uses live scenario scoreboard stats
-- **Party / warband** — uses `GRP_STATS` chat packets (own cache; does not require RoRGroupScoreboard)
-- **Range** — map-pip distance filter (default 100 ft)
-- **Sticky / hysteresis** — dampens flicker when rankings shuffle
-- Clears the macro while you have a **living hostile** target; dead corpses count as no target
-- Never assists yourself
-- Bind and press the macro yourself — RoR ignores `/assist` sent from addon Lua
+- Scenarios (scoreboard) and party/warband (`GRP_STATS`; no RoRGroupScoreboard)
+- Range filter, sticky pick, optional clear while you have a living hostile
+- Always-active icon (`23166`); burn glow on a new unacked pick, cleared after you press the macro (deferred, safe for `/assist`)
+- Config window: `/ezassist`, `/ezass`, `/eza`, or click the yellow/orange **[EZAssist]** System chat tag
+- You must bind and press the macro yourself (RoR ignores `/assist` from addon Lua)
 
 ## Install
 
-1. Copy the addon into `Interface\AddOns\EZAssist\` (or run `.\tools\deploy.ps1` from this repo)
-2. Enable **EZAssist** in the addon list (optional: **LibSlash** for `/eza`)
+1. Copy into `Interface\AddOns\EZAssist\` (or `.\tools\deploy.ps1` from this repo)
+2. Enable **EZAssist** (optional: **LibSlash** for slash commands)
 3. `/reload`
 
-Do **not** run CustomUI SmartAssist and EZAssist at the same time — both manage an assist macro.
-
-## Slash commands
-
-Requires LibSlash.
+## Slash (LibSlash)
 
 | Command | Effect |
 | :--- | :--- |
-| `/eza` / `/ezassist` | Help |
-| `/eza on` / `off` | Enable / disable (creates or deletes the macro) |
-| `/eza range <1-500>` | Assist range in feet |
-| `/eza notify on\|off` | Chat line when the assist target changes |
-| `/eza status` | Diagnostic snapshot |
+| `/ezassist` `/ezass` `/eza` | Open config |
+| `/eza help` | Help |
+| `/eza on` / `off` | Enable / disable |
+| `/eza range <1-500>` | Assist range (ft) |
+| `/eza notify on\|off` | Chat when pick changes |
+| `/eza status` | Diagnostics |
 
-## Settings
+Settings (`EZAssist.Settings`): `enabled`, `clearOnHostile`, `glowOnNewAssist`, `range`, `notify`.
 
-Saved in `EZAssist.Settings`:
-
-- `enabled` (default `true`)
-- `range` (default `100`)
-- `notify` (default `false`)
-
-## Deploy (dev)
+## Deploy
 
 ```powershell
 .\tools\deploy.ps1
 ```
 
-Copies runtime files into `C:\Users\talla\Games\Return of Reckoning\Interface\AddOns\EZAssist` and prunes extras.
+See [CHANGELOG.md](CHANGELOG.md).

@@ -11,3 +11,9 @@ Thumbs.db
 *.lua~
 *.lua.bak
 *.lua.old
+
+# Local tooling noise
+*.log
+*.tmp
+*.zip
+dist/
