@@ -6,6 +6,11 @@
 - Allies who leave your party or warband are no longer kept as the assist target
 - EZAssist will not overwrite or delete a macro you saved in its previous slot
 - The "all macro slots are full" note only appears when every macro slot is actually taken
+- Friendly lock is always on (no toggle): press on an ally to lock, press on yourself to clear and fall back to Auto KD
+- Friendly lock allowed outside party/warband/scenario; warns that `/assist` will not work there
+- Soft disable keeps the macro slot (avoids freeze with SwiftAssist on hard delete/recreate)
+- NPCs ignored for lock; `clearOnHostile` only clears on a living hostile player (not NPCs)
+- Config copy and layout updates for the longer assist notes
 
 ## 1.0.2 — 2026-10-28
 
