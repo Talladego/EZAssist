@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4 — 2026-10-29
+
+- Friendly lock is always on (no toggle): press on an ally to lock, press on yourself to clear and fall back to Auto KD
+- Friendly lock allowed outside party/warband/scenario; warns that `/assist` will not work there
+- Soft disable keeps the macro slot (avoids freeze with SwiftAssist on hard delete/recreate)
+- NPCs ignored for lock; `clearOnHostile` only clears on a living hostile player (not NPCs)
+- Config copy and layout updates for the longer assist notes
+
 ## 1.0.3 — 2026-10-29
 
 - Party and warband assist no longer floods chat with errors when another addon is also tracking group combat

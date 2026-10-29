@@ -1,16 +1,18 @@
 # EZAssist
 
-Standalone Return of Reckoning addon: one managed hotbar macro `/assist <player>` for the best nearby ally by **KillDamage → Deathblows → Total Damage**.
+Standalone Return of Reckoning addon: one managed hotbar macro `/assist <player>`.
+
+**Friendly lock** (default): press the macro while targeting an ally to lock them; target yourself and press to clear. **Auto KD** (fallback): with no lock, scenarios / party / warband pick by KillDamage → Deathblows → Total Damage.
 
 Extracted from [CustomUI](https://github.com/Talladego/CustomUIv3) SmartAssist. Do **not** run both at once.
 
 ## Features
 
-- Scenarios (scoreboard) and party/warband (`GRP_STATS`; no RoRGroupScoreboard)
+- Friendly lock + Auto KD fallback (scenarios / party / warband via scoreboard / `GRP_STATS`)
 - Range filter, sticky pick, optional clear while you have a living hostile
-- Always-active icon (`23166`); burn glow on a new unacked pick, cleared after you press the macro (deferred, safe for `/assist`)
-- Config window: `/ezassist`, `/ezass`, `/eza`, or click the yellow/orange **[EZAssist]** System chat tag
-- You must bind and press the macro yourself (RoR ignores `/assist` from addon Lua)
+- Always-active icon (`23166`); burn glow on a new unacked pick, cleared after you press the macro
+- Config: `/ezassist`, `/ezass`, `/eza`, or click the yellow/orange **[EZAssist]** System chat tag
+- Bind and press the macro yourself (RoR ignores `/assist` from addon Lua)
 
 ## Install
 
