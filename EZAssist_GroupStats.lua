@@ -1,7 +1,7 @@
 ----------------------------------------------------------------
 -- EZAssist.GroupStats
 -- Open-world party/warband combat scoreboard via GRP_STATS chat packets
--- (same source RoRGroupScoreboard uses). Independent cache — does not read
+-- (same source RoRGroupScoreboard uses). Independent cache - does not read
 -- or require RoRGroupScoreboard.
 ----------------------------------------------------------------
 
@@ -202,7 +202,7 @@ function GroupStats.GetRowByKey(key)
     return nil
 end
 
---- Best party/warband ally by KillDamage → Deathblows → Total Damage.
+--- Best party/warband ally by KillDamage -> Deathblows -> Total Damage.
 --- opts.normalizeNameKey, opts.excludeKey, opts.requireCombatData (default true),
 --- opts.accept(key, row) -> bool.
 function GroupStats.PickBestAssistCandidate(opts)

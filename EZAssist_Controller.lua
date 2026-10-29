@@ -2,15 +2,16 @@
 -- EZAssist
 -- Managed hotbar macro "/assist <player>" for scenarios and open-world
 -- party/warband. Picks the alive ally within range with best
--- KillDamage → Deathblows → Total Damage. Never assists self.
+-- KillDamage -> Deathblows -> Total Damage. Never assists self.
 -- Scenario rows: EZAssist.ScenarioStats / GetScenarioPlayers.
 -- Party/warband: GRP_STATS packets (EZAssist.GroupStats; not RoRGroupScoreboard).
 -- Optional clearOnHostile: clears the macro while you have a living hostile player (not NPCs).
 -- Friendly lock (always on): press assist while targeting an ally player to lock them;
 -- press while targeting self to clear and fall back to KD ranking.
+-- A lock also clears when that ally leaves the party or warband.
 -- Enable seats/keeps the managed macro. Disable stops updates and clears /assist text
 -- but does not wipe the macro slot (hard delete + recreate freezes with SwiftAssist
--- on MACROS_LOADED). Bind and press the macro yourself — RoR ignores /assist from addons.
+-- on MACROS_LOADED). Bind and press the macro yourself - RoR ignores /assist from addons.
 ----------------------------------------------------------------
 
 EZAssist = EZAssist or {}
@@ -105,6 +106,7 @@ local m_flushMacroWrite = false
 local m_pendingMacroWrite = false
 local m_pendingMacroWriteName = nil -- wstring or nil (clear)
 local m_friendlyAssistLock = nil -- wstring; locked by macro press on ally player
+local m_friendlyLockSeenOnRoster = false
 local m_glowAckName = nil -- wstring; last pick the player pressed the macro for
 local m_glowAckKey = nil -- cached NormalizeNameKey(m_glowAckName)
 local m_stockActionButtonOnLButtonUp = nil
@@ -338,7 +340,7 @@ local function TargetHealthKnown(unitId)
     if type(TargetInfo.UnitHealth) ~= "function" then
         return nil
     end
-    -- Fallback: stock UnitHealth collapses missing HP to 0 — cannot prove dead.
+    -- Fallback: stock UnitHealth collapses missing HP to 0 - cannot prove dead.
     return nil
 end
 
@@ -480,6 +482,7 @@ end
 
 local function ClearFriendlyAssistLock()
     m_friendlyAssistLock = nil
+    m_friendlyLockSeenOnRoster = false
 end
 
 local function FriendlyAssistLocked()
@@ -663,6 +666,39 @@ local function BuildAliveByKey()
     end
 
     return alive
+end
+
+--- Nil when the party/warband roster is empty (not ready, or not in a group).
+local function RosterContainsKey(key)
+    if key == nil or next(m_rosterKeys) == nil then
+        return nil
+    end
+    return m_rosterKeys[key] == true
+end
+
+--- Remember a locked ally once a non-empty roster lists them.
+local function NoteFriendlyLockOnRoster()
+    if m_friendlyAssistLock == nil then
+        m_friendlyLockSeenOnRoster = false
+        return
+    end
+    if RosterContainsKey(NormalizeNameKey(m_friendlyAssistLock)) == true then
+        m_friendlyLockSeenOnRoster = true
+    end
+end
+
+--- Clear a lock only after that ally was on the roster and a later non-empty
+--- roster no longer lists them. An empty roster is not a departure.
+local function ClearFriendlyLockIfDeparted()
+    if m_friendlyAssistLock == nil or not m_friendlyLockSeenOnRoster then
+        return false
+    end
+    if RosterContainsKey(NormalizeNameKey(m_friendlyAssistLock)) ~= false then
+        return false
+    end
+    ClearFriendlyAssistLock()
+    PrintFriendlyUnlock()
+    return true
 end
 
 local function IsCandidateAlive(key, aliveByKey)
@@ -926,7 +962,7 @@ local function CommitSticky(key, hold)
 end
 
 --- Returns assist display name (wstring) or nil; second return is pick detail table.
---- Locked friendly assist (macro press) overrides KD → DB → TD until cleared (self + press).
+--- Locked friendly assist (macro press) overrides KD -> DB -> TD until cleared (self + press).
 --- No ranked pick until someone has real KD/DB/damage. Sticky + hysteresis dampens flicker.
 --- opts.dryRun = true: rank only; do not mutate sticky/hold state (for DebugStatus).
 function SmartAssist.PickAssistTarget(opts)
@@ -1322,7 +1358,7 @@ local function InstallGlowPressHook()
         local nextFn = m_stockActionButtonOnLButtonUp
         local slot = m_macroSlot
         local doMacro = GameData and GameData.PlayerActions and GameData.PlayerActions.DO_MACRO
-        -- Field reads + assigns only. No TargetInfo / SetMacroData here — that drops /assist.
+        -- Field reads + assigns only. No TargetInfo / SetMacroData here - that drops /assist.
         if self
             and doMacro ~= nil
             and self.m_ActionType == doMacro
@@ -1397,7 +1433,7 @@ local function ApplyPendingMacroPress()
                     ClearFriendlyAssistLock()
                     PrintFriendlyUnlock()
                     m_assistSuppressed = false
-                    -- Defer SetMacroData — same-frame WriteMacro races WindowGameAction /assist.
+                    -- Defer SetMacroData - same-frame WriteMacro races WindowGameAction /assist.
                     ScheduleMacroWrite(nil)
                     m_dirty = true
                     m_refreshNow = true
@@ -1407,6 +1443,9 @@ local function ApplyPendingMacroPress()
                 local oldKey = NormalizeNameKey(m_friendlyAssistLock)
                 if newKey ~= oldKey then
                     m_friendlyAssistLock = lockName
+                    m_friendlyLockSeenOnRoster = false
+                    BuildAliveByKey()
+                    NoteFriendlyLockOnRoster()
                     PrintFriendlyLock(lockName)
                     m_assistSuppressed = false
                     ScheduleMacroWrite(lockName)
@@ -1510,7 +1549,7 @@ WriteMacro = function(assistName)
 end
 
 --- Soft-disable cleanup. Keep the EZAssist macro slot (empty /assist text).
---- Hard SetMacroData("",…,0) + recreate on enable freezes with SwiftAssist on MACROS_LOADED.
+--- Hard SetMacroData("",...,0) + recreate on enable freezes with SwiftAssist on MACROS_LOADED.
 --- Ownership checks in WriteMacro still refuse to overwrite a foreign slot.
 local function SoftDisableMacroState()
     m_macroSlot = FindOwnedMacroSlot() or m_macroSlot
@@ -1799,11 +1838,16 @@ function SmartAssist.OnGroupUpdated()
     -- GROUP_UPDATED / BATTLEGROUP_UPDATED (and the other group events) drop
     -- scoreboard rows for allies who left. Empty roster means the list is not
     -- ready, so PruneToRoster leaves the cache alone.
+    BuildAliveByKey()
     local GS = GroupStats()
     if GS ~= nil and type(GS.PruneToRoster) == "function" then
-        BuildAliveByKey()
         GS.PruneToRoster(m_rosterKeys)
     end
+    if ClearFriendlyLockIfDeparted() then
+        MarkAssistDirtyNow()
+        return
+    end
+    NoteFriendlyLockOnRoster()
     MarkAssistDirty()
 end
 
@@ -1826,7 +1870,7 @@ function SmartAssist.OnMacrosLoaded()
         return
     end
     -- Slot indexes move when macros reload. Drop the cache; the next write rescans.
-    -- Do not WriteMacro here — SetMacroData often fires MACROS_LOADED (re-entrancy).
+    -- Do not WriteMacro here - SetMacroData often fires MACROS_LOADED (re-entrancy).
     m_macroSlot = nil
     MarkAssistDirtyNow()
 end
@@ -1949,7 +1993,7 @@ local function RequestSync()
     m_pendingSync = true
 end
 
---- Immediate sync (safe from mod Initialize / deferred OnUpdate — not from button clicks).
+--- Immediate sync (safe from mod Initialize / deferred OnUpdate - not from button clicks).
 function SmartAssist.Sync()
     m_pendingSync = false
     local notifyWasOn = m_notify == true
@@ -1967,10 +2011,13 @@ function SmartAssist.Sync()
         m_targetDirty = false
         m_updateElapsed = 0
         RegisterHandlers()
-        m_macroSlot = FindOwnedMacroSlot() or m_macroSlot
-        -- Create only if missing. Do not SetMacroData when the empty macro already exists
-        -- (avoids MACROS_LOADED storms with SwiftAssist after disable/enable).
-        if m_macroSlot == nil then
+        -- Keep an existing EZAssist macro as-is. WriteMacro skips SetMacroData
+        -- when that slot already has the right content, and is only called here
+        -- when the macro was deleted or overwritten.
+        local owned = FindOwnedMacroSlot()
+        if owned then
+            m_macroSlot = owned
+        else
             WriteMacro(nil)
         end
         if IsAssistContext() then

@@ -1,6 +1,6 @@
 ----------------------------------------------------------------
 -- EZAssist.ScenarioStats
--- Live scenario / city-siege player stats stream + KD→DB→TD ranking.
+-- Live scenario / city-siege player stats stream + KD->DB->TD ranking.
 -- Extracted from CustomUI GroupIcons ScenarioStats (assist-only surface).
 ----------------------------------------------------------------
 
@@ -87,7 +87,7 @@ function ScenarioStats.Release()
     end
 end
 
---- Kill damage from a GetScenarioPlayers() row (stock maps renownbonus → killdamagedealt).
+--- Kill damage from a GetScenarioPlayers() row (stock maps renownbonus -> killdamagedealt).
 function ScenarioStats.RowKillDamage(row)
     if type(row) ~= "table" then
         return 0
