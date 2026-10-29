@@ -13,7 +13,9 @@
 - You can only lock another player. Clear on hostile only happens when you target an enemy player, not a monster or pet
 - The config window explains how to lock an ally and how automatic assist picks a target
 - The assist macro glows whenever it has a target. The glow checkbox was removed from the config window; /eza glow still turns the glow on or off
+- Macro glow is gold while you've locked an ally and green while Auto KD picks the target.
 - A locked ally is cleared when they leave your party or warband
+- Performance improvements.
 
 ## 1.0.2 - 2026-10-28
 
