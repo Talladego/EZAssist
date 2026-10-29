@@ -10,7 +10,7 @@ Extracted from [CustomUI](https://github.com/Talladego/CustomUIv3) SmartAssist. 
 
 - Friendly lock + Auto KD fallback (scenarios / party / warband via scoreboard / `GRP_STATS`)
 - Range filter, sticky pick, optional clear while you have a living hostile player
-- Always-active icon (`23166`). The macro glows whenever it has a target, and glows brighter for a new target. There is no glow checkbox; `/eza glow` still turns the glow on or off
+- Always-active icon (`23166`). Order gold glow for manual lock, Destruction green for Auto KD (brighter for a new target). No glow checkbox; `/eza glow` still turns the glow on or off
 - Config: `/ezassist`, `/ezass`, `/eza`, or click the yellow/orange **[EZAssist]** System chat tag
 - Bind and press the macro yourself (RoR ignores `/assist` from addon Lua)
 

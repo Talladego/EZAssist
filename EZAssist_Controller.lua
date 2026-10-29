@@ -1258,12 +1258,9 @@ local function ForEachMacroActionButton(macroSlot, fn)
     end
 end
 
+--- Manual friendly lock → Order gold (fury). Auto KD → Destruction green (waaagh).
 local function GlowTextureBase()
-    if GameData
-        and GameData.Realm
-        and GameData.Player
-        and GameData.Player.realm == GameData.Realm.ORDER
-    then
+    if FriendlyAssistLocked() then
         return "anim_fury_"
     end
     return "anim_waaagh_"
