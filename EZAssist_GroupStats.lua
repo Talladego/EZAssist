@@ -17,6 +17,10 @@ local m_rpExclusiveWrap = nil
 local m_rpWrapTable = nil
 local m_rpWrapKey = nil
 local m_rpWrapOrig = nil
+local m_rpWrapFn = nil
+-- Bumped on Shutdown so an orphaned wrapper (a later addon still calling it)
+-- stops delivering packets after we unhook.
+local m_hookGen = 0
 local m_byCharId = {} -- [charId] = row
 
 local function NormalizeNameKey(name)
@@ -154,6 +158,28 @@ end
 
 function GroupStats.Clear()
     m_byCharId = {}
+end
+
+--- Drop rows whose normalized name is not in the current group/warband.
+--- rosterKeys: [nameKey] = present (any non-nil value, including false).
+--- Nil or empty means the roster is not ready; the cache is left alone.
+--- Does not allocate.
+function GroupStats.PruneToRoster(rosterKeys)
+    if type(rosterKeys) ~= "table" or next(rosterKeys) == nil then
+        return 0
+    end
+    local removed = 0
+    for charId, row in pairs(m_byCharId) do
+        local key = nil
+        if type(row) == "table" then
+            key = row.key
+        end
+        if key == nil or rosterKeys[key] == nil then
+            m_byCharId[charId] = nil
+            removed = removed + 1
+        end
+    end
+    return removed
 end
 
 function GroupStats.Count()
@@ -301,6 +327,25 @@ function GroupStats.TryBootstrap()
     return added
 end
 
+--- One wrapper. prev is fixed in this closure (never a shared upvalue).
+--- hookGen ignores the call after Shutdown so a successor that still holds
+--- this function cannot deliver a second OnPacket.
+local function MakeRpWrap(prev)
+    local gen = m_hookGen
+    return function(text)
+        if type(prev) == "function" then
+            prev(text)
+        end
+        if gen == m_hookGen then
+            GroupStats.OnPacket(text)
+        end
+    end
+end
+
+local function RpHookInstalled()
+    return m_directCallback ~= nil or m_rpExclusiveWrap ~= nil or m_rpWrapFn ~= nil
+end
+
 local function EnsureRpListening()
     if type(ror_PacketHandling) ~= "table" then
         return false
@@ -310,58 +355,42 @@ local function EnsureRpListening()
         return false
     end
 
-    local existing = RP["GRP_STATS"]
-
-    -- Already chained on exclusive (function) builds.
-    if m_rpExclusiveWrap ~= nil and existing == m_rpExclusiveWrap then
+    -- At most one wrap per path. A later refresh must not wrap our own wrapper
+    -- or a foreign successor that already calls us (that grows one frame per
+    -- tick until GRP_STATS overflows).
+    if RpHookInstalled() then
         return true
     end
 
+    local existing = RP["GRP_STATS"]
+
     -- Live RoR builds often store a single function (not a list). Chain it.
     if type(existing) == "function" then
-        if existing == GroupStats.OnPacket or existing == m_rpExclusiveWrap then
+        if existing == GroupStats.OnPacket then
             return true
         end
-        -- Already wrapped once. Do not wrap a foreign successor that may call our
-        -- old wrap (shared upvalue reassignment -> stack overflow with other addons).
-        if m_rpExclusiveWrap ~= nil then
-            return true
-        end
-        -- Capture prev in this closure; never read m_rpExclusiveOrig inside the wrap.
         local prev = existing
         m_rpExclusiveOrig = prev
-        m_rpExclusiveWrap = function(text)
-            if type(prev) == "function" then
-                prev(text)
-            end
-            GroupStats.OnPacket(text)
-        end
+        m_rpExclusiveWrap = MakeRpWrap(prev)
         RP["GRP_STATS"] = m_rpExclusiveWrap
         return true
     end
 
     -- Multi-callback list builds (VinyUI-style Register).
     if type(existing) == "table" then
-        if m_directCallback ~= nil then
-            return true
-        end
         for key, fn in pairs(existing) do
             if type(fn) == "function" and fn ~= GroupStats.OnPacket then
+                local prev = fn
                 m_rpWrapTable = existing
                 m_rpWrapKey = key
-                local prev = fn
                 m_rpWrapOrig = prev
-                existing[key] = function(text)
-                    if type(prev) == "function" then
-                        prev(text)
-                    end
-                    GroupStats.OnPacket(text)
-                end
+                m_rpWrapFn = MakeRpWrap(prev)
+                existing[key] = m_rpWrapFn
                 return true
             end
         end
         if type(ror_PacketHandling.Register) == "function" then
-            m_directCallback = GroupStats.OnPacket
+            m_directCallback = MakeRpWrap(nil)
             ror_PacketHandling.Register("GRP_STATS", m_directCallback)
             return true
         end
@@ -369,17 +398,24 @@ local function EnsureRpListening()
     end
 
     if type(ror_PacketHandling.Register) == "function" then
-        m_directCallback = GroupStats.OnPacket
+        m_directCallback = MakeRpWrap(nil)
         ror_PacketHandling.Register("GRP_STATS", m_directCallback)
         return true
     end
     return false
 end
 
+-- Harness entry. RefreshAssist goes through Initialize; tests call this in a loop.
+GroupStats.EnsureRpListening = EnsureRpListening
+
 --- Listen for GRP_STATS into our own cache.
 --- Important: exclusive ror_PacketHandling keeps the registered function in RP[phrase];
 --- replacing RoRGroupScoreboard.Packet alone does not receive packets.
 function GroupStats.Initialize()
+    -- RefreshAssist used to call this every 0.5s. Once the hook is up, do nothing.
+    if m_active == true then
+        return
+    end
     if EnsureRpListening() then
         m_active = true
     end
@@ -387,22 +423,30 @@ function GroupStats.Initialize()
 end
 
 function GroupStats.Shutdown()
+    -- Retire every wrapper we installed, including ones a later addon still calls.
+    m_hookGen = m_hookGen + 1
+    m_active = false
+
     if m_directCallback ~= nil
         and type(ror_PacketHandling) == "table"
         and type(ror_PacketHandling.Unregister) == "function"
     then
         ror_PacketHandling.Unregister("GRP_STATS", m_directCallback)
-        m_directCallback = nil
     end
+    m_directCallback = nil
 
-    if m_rpWrapTable ~= nil and m_rpWrapKey ~= nil and m_rpWrapOrig ~= nil
-        and m_rpWrapTable[m_rpWrapKey] ~= nil
+    -- Restore only while our wrapper is still the slot. A foreign successor
+    -- that replaced it must stay; the gen bump above silences our old wrap.
+    if m_rpWrapTable ~= nil and m_rpWrapKey ~= nil and type(m_rpWrapOrig) == "function"
+        and m_rpWrapFn ~= nil
+        and m_rpWrapTable[m_rpWrapKey] == m_rpWrapFn
     then
         m_rpWrapTable[m_rpWrapKey] = m_rpWrapOrig
     end
     m_rpWrapTable = nil
     m_rpWrapKey = nil
     m_rpWrapOrig = nil
+    m_rpWrapFn = nil
 
     if m_rpExclusiveWrap ~= nil
         and type(ror_PacketHandling) == "table"
@@ -415,6 +459,5 @@ function GroupStats.Shutdown()
     m_rpExclusiveWrap = nil
     m_rpExclusiveOrig = nil
 
-    m_active = false
     GroupStats.Clear()
 end

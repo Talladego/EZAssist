@@ -7,7 +7,7 @@
 
 EZAssist = EZAssist or {}
 EZAssist.Settings = EZAssist.Settings or {}
-EZAssist.VERSION = "1.0.2"
+EZAssist.VERSION = "1.0.3"
 
 -- Yellow/orange [EZAssist] chat tag; data=EZA: opens config on click.
 local c_CHAT_PREFIX_TEXT = "EZAssist"

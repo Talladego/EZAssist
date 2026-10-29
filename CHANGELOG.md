@@ -1,8 +1,13 @@
 # Changelog
 
+## 1.0.3 — 2026-10-29
+
+- Party and warband assist no longer floods chat with errors when another addon is also tracking group combat
+- Allies who leave your party or warband are no longer kept as the assist target
+- EZAssist will not overwrite or delete a macro you saved in its previous slot
+
 ## 1.0.2 — 2026-10-28
 
-- Fix GRP_STATS packet wrap stack overflow when another addon also chains `ror_PacketHandling.RP`
 - Notify chat: announce each assist target once until the pick changes (no re-spam on hostile clear / wstring churn)
 - Notify line no longer repeats `EZAssist:` under the `[EZAssist]` tag
 - Defaults for new installs: range `65`, `clearOnHostile` off (existing saved settings unchanged)

@@ -91,6 +91,8 @@ jobs:
             sed -E 's/L"([^"]*)"/"\1"/g' "$f" > "$tmp/$f"
             luac5.1 -p "$tmp/$f"
           done
+          lua5.1 tools/test-group-stats-wrap.lua
+          lua5.1 tools/test-macro-slot.lua
 
       - name: Pack addon zip
         id: pack

@@ -27,6 +27,8 @@ local c_GLOW_LEVEL = 2
 
 local c_DISTANCE_FIX = 1 / 1.06
 local c_MAX_MAP_POINTS = 511
+-- After one full pip walk, off-map names skip the 64-point scan for a few picks.
+local c_SWEEP_RESCAN_PICKS = 8
 local c_MAP_WINDOW = "EA_Window_OverheadMapMapDisplay"
 local c_MAP_POINT_TYPE_FILTER = {
     [SystemData.MapPips.GROUP_MEMBER] = true,
@@ -56,8 +58,15 @@ local m_lastAssistName = nil -- wstring or nil
 local m_lastAssistKey = nil -- cached NormalizeNameKey(m_lastAssistName)
 local m_lastNotifyKey = nil -- normalized name; survives hostile clear so we do not re-spam
 local m_fullSlotsWarned = false
-local m_distCache = {} -- [nameKey] = { index, rawName, distance }
+local m_distCache = {} -- [nameKey] = { index, rawName, distance } or { miss = true, sweep = n }
 local m_scanCursor = 1
+local m_sweptPoints = 0
+local m_sweepReady = false
+local m_sweepId = 0
+local m_picksSinceSweep = 0
+local m_walkedThisPick = false
+-- Reused party/warband name keys for GroupStats.PruneToRoster. Cleared in place.
+local m_rosterKeys = {}
 local m_updateElapsed = 0
 local m_stickyKey = nil
 local m_stickyHoldLeft = 0
@@ -339,18 +348,26 @@ end
 local function NoteAlive(alive, name, healthValue)
     local key = NormalizeNameKey(name)
     if key == nil then
-        return
+        return nil
     end
     local hp = tonumber(healthValue) or 0
     if hp > 0 and hp < 1 then
         hp = 0
     end
     alive[key] = hp > 0
+    return key
+end
+
+local function ClearRosterKeys()
+    for key in pairs(m_rosterKeys) do
+        m_rosterKeys[key] = nil
+    end
 end
 
 --- Returns map nameKey -> isAlive. Empty map means "no HP data yet".
 local function BuildAliveByKey()
     local alive = {}
+    ClearRosterKeys()
 
     if IsScenarioContext()
         and type(GameData) == "table"
@@ -391,7 +408,10 @@ local function BuildAliveByKey()
                                 end
                             end
                             if type(member) == "table" and member.name ~= nil then
-                                NoteAlive(alive, member.name, member.healthPercent or member.health)
+                                local key = NoteAlive(alive, member.name, member.healthPercent or member.health)
+                                if key ~= nil then
+                                    m_rosterKeys[key] = true
+                                end
                             end
                         end
                     end
@@ -415,7 +435,10 @@ local function BuildAliveByKey()
                     member = data[m]
                 end
                 if type(member) == "table" and member.name ~= nil then
-                    NoteAlive(alive, member.name, member.healthPercent or member.health)
+                    local key = NoteAlive(alive, member.name, member.healthPercent or member.health)
+                    if key ~= nil then
+                        m_rosterKeys[key] = true
+                    end
                 end
             end
         end
@@ -448,6 +471,29 @@ local function IsWithinRange(dist, range)
     return dist <= range
 end
 
+local function AdvanceScanCursor()
+    m_scanCursor = m_scanCursor + 1
+    m_sweptPoints = m_sweptPoints + 1
+    if not m_sweepReady and m_sweptPoints >= c_MAX_MAP_POINTS then
+        m_sweepReady = true
+        m_sweepId = m_sweepId + 1
+        m_picksSinceSweep = 0
+    end
+    if m_scanCursor > c_MAX_MAP_POINTS then
+        m_scanCursor = 1
+        return true
+    end
+    return false
+end
+
+local function RememberMapMiss(nameKey)
+    m_distCache[nameKey] = { miss = true, sweep = m_sweepId }
+end
+
+--- Distance in map units, or nil when the pip is unknown.
+--- One 64-point walk per assist pick. After a full pass, names that were not
+--- on the map are remembered so later candidates do not walk again until the
+--- next sweep. Unknown distance still counts as in range.
 local function LookupMapDistance(nameKey, rawName)
     if nameKey == nil or type(GetMapPointData) ~= "function" then
         return nil
@@ -471,33 +517,56 @@ local function LookupMapDistance(nameKey, rawName)
             return dist
         end
         m_distCache[nameKey] = nil
+        -- That pip moved. The completed sweep no longer covers the map.
+        m_sweepReady = false
+        m_sweptPoints = 0
+        m_picksSinceSweep = 0
+    elseif cache ~= nil and cache.miss == true and cache.sweep == m_sweepId and m_sweepReady then
+        return nil
     end
 
-    -- Budgeted walk from cursor.
+    if m_sweepReady then
+        RememberMapMiss(nameKey)
+        return nil
+    end
+
+    if m_walkedThisPick then
+        local found = m_distCache[nameKey]
+        if found ~= nil and found.index ~= nil then
+            return found.distance
+        end
+        return nil
+    end
+    m_walkedThisPick = true
+
+    -- Budgeted walk from cursor. Every name we pass is cached, not only the one
+    -- we were asked for.
     local scanned = 0
     local budget = 64
     while scanned < budget do
         local mpd = GetMapPointData(c_MAP_WINDOW, m_scanCursor)
+        local foundDist = nil
         if mpd and mpd.name and mpd.pointType and c_MAP_POINT_TYPE_FILTER[mpd.pointType] then
             local key = NormalizeNameKey(mpd.name)
             if key ~= nil then
                 local dist = math.floor((tonumber(mpd.distance) or 0) * c_DISTANCE_FIX)
                 m_distCache[key] = { index = m_scanCursor, rawName = mpd.name, distance = dist }
                 if key == nameKey then
-                    m_scanCursor = m_scanCursor + 1
-                    if m_scanCursor > c_MAX_MAP_POINTS then
-                        m_scanCursor = 1
-                    end
-                    return dist
+                    foundDist = dist
                 end
             end
         end
-        m_scanCursor = m_scanCursor + 1
-        if m_scanCursor > c_MAX_MAP_POINTS then
-            m_scanCursor = 1
+        local wrapped = AdvanceScanCursor()
+        if foundDist ~= nil then
+            return foundDist
+        end
+        if wrapped then
             break
         end
         scanned = scanned + 1
+    end
+    if m_sweepReady then
+        RememberMapMiss(nameKey)
     end
     return nil
 end
@@ -651,7 +720,21 @@ function SmartAssist.PickAssistTarget(opts)
         return nil
     end
 
+    m_walkedThisPick = false
+    if m_sweepReady then
+        m_picksSinceSweep = m_picksSinceSweep + 1
+        if m_picksSinceSweep >= c_SWEEP_RESCAN_PICKS then
+            m_sweepReady = false
+            m_sweptPoints = 0
+            m_picksSinceSweep = 0
+        end
+    end
+
     local aliveByKey = BuildAliveByKey()
+    local groupStats = GroupStats()
+    if groupStats ~= nil and type(groupStats.PruneToRoster) == "function" then
+        groupStats.PruneToRoster(m_rosterKeys)
+    end
     ClearPlayerRowIndex()
     local best = nil
     local accept = function(key, row)
@@ -787,6 +870,34 @@ local function FindEmptyMacroSlot(macros)
         end
     end
     return nil
+end
+
+local function MacroRowIsEmpty(row)
+    if type(row) ~= "table" then
+        return false
+    end
+    return (row.iconNum == 0 or row.iconNum == nil)
+        and (row.text == nil or row.text == L"")
+        and (row.name == nil or row.name == L"")
+end
+
+--- Safe to write: the slot is blank, or it already holds the EZAssist macro.
+local function MacroSlotOwnedOrEmpty(macros, slot)
+    if type(macros) ~= "table" or type(slot) ~= "number" then
+        return false
+    end
+    local row = macros[slot]
+    if MacroRowIsEmpty(row) then
+        return true
+    end
+    return IsOwnedMacroName(row.name)
+end
+
+local function MacroSlotIsOwned(macros, slot)
+    return type(macros) == "table"
+        and type(slot) == "number"
+        and type(macros[slot]) == "table"
+        and IsOwnedMacroName(macros[slot].name)
 end
 
 --- Diagnostic snapshot for /script or RoRMCP (read-only; does not mutate sticky).
@@ -999,6 +1110,13 @@ local function ClearMacroFromActionBars(macroSlot)
     end)
 end
 
+local function WarnMacroSlotsFull(macros)
+    if type(macros) == "table" and #macros > 0 and not m_fullSlotsWarned then
+        EZAssist.Print(L"EZAssist: all macro slots are full.")
+        m_fullSlotsWarned = true
+    end
+end
+
 local function WriteMacro(assistName)
     if type(SetMacroData) ~= "function" then
         return false
@@ -1011,34 +1129,51 @@ local function WriteMacro(assistName)
         text = L"/assist " .. assistName
     end
 
-    -- One macro-table read for the slot search. The equality check below uses
-    -- GetMacrosData when that is a different source than DataUtils.GetMacros,
-    -- matching the previous compare. Steady state (slot already known) is one read.
+    -- Confirm the cached slot is still ours (or empty) before writing.
+    -- A player macro saved into that index must send us looking again.
+    local macros = GetMacrosTable()
     local slot = m_macroSlot
-    local macros = nil
+    if slot ~= nil and not MacroSlotOwnedOrEmpty(macros, slot) then
+        m_macroSlot = nil
+        slot = nil
+    end
     if slot == nil then
-        macros = GetMacrosTable()
         slot = FindOwnedMacroSlot(macros)
         if slot == nil then
             slot = FindEmptyMacroSlot(macros)
         end
     end
-    if slot == nil then
-        if not m_fullSlotsWarned then
-            EZAssist.Print(L"EZAssist: all macro slots are full.")
-            m_fullSlotsWarned = true
+
+    local confirm = macros
+    local dataUtilsMacros = type(DataUtils) == "table" and type(DataUtils.GetMacros) == "function"
+    if type(GetMacrosData) == "function" and dataUtilsMacros then
+        local alt = GetMacrosData()
+        if type(alt) == "table" then
+            confirm = alt
+            if slot ~= nil and not MacroSlotOwnedOrEmpty(alt, slot) then
+                m_macroSlot = nil
+                slot = FindOwnedMacroSlot(alt)
+                if slot == nil then
+                    slot = FindEmptyMacroSlot(alt)
+                end
+            end
         end
+    end
+    macros = macros or {}
+    confirm = confirm or macros
+
+    if slot == nil
+        or not MacroSlotOwnedOrEmpty(macros, slot)
+        or not MacroSlotOwnedOrEmpty(confirm, slot)
+    then
+        WarnMacroSlotsFull(confirm)
+        m_macroSlot = nil
         return false
     end
     m_macroSlot = slot
     m_fullSlotsWarned = false
 
-    local dataUtilsMacros = type(DataUtils) == "table" and type(DataUtils.GetMacros) == "function"
-    if type(GetMacrosData) == "function" and (macros == nil or dataUtilsMacros) then
-        macros = GetMacrosData() or {}
-    end
-    macros = macros or {}
-    local row = macros[slot]
+    local row = confirm[slot]
     if row and row.name == name and row.text == text and tonumber(row.iconNum) == icon then
         return true
     end
@@ -1048,8 +1183,31 @@ local function WriteMacro(assistName)
 end
 
 local function DeleteMacroAndClearBars()
-    local slot = m_macroSlot or FindOwnedMacroSlot()
-    if slot ~= nil then
+    local macros = GetMacrosTable()
+    local slot = m_macroSlot
+    if not MacroSlotIsOwned(macros, slot) then
+        slot = FindOwnedMacroSlot(macros)
+    end
+    -- When both macro sources exist, delete only a slot both still call ours.
+    if type(DataUtils) == "table"
+        and type(DataUtils.GetMacros) == "function"
+        and type(GetMacrosData) == "function"
+    then
+        local alt = GetMacrosData()
+        if type(alt) == "table" then
+            if not MacroSlotIsOwned(alt, slot) then
+                local altSlot = FindOwnedMacroSlot(alt)
+                if MacroSlotIsOwned(macros, altSlot) and MacroSlotIsOwned(alt, altSlot) then
+                    slot = altSlot
+                else
+                    slot = nil
+                end
+            elseif not MacroSlotIsOwned(macros, slot) then
+                slot = nil
+            end
+        end
+    end
+    if MacroSlotIsOwned(macros, slot) then
         ClearMacroFromActionBars(slot)
         if type(SetMacroData) == "function" then
             SetMacroData(L"", L"", 0, slot)
@@ -1127,11 +1285,15 @@ local function EnsureGroupStatsListening()
     if GS == nil then
         return
     end
+    if type(GS.IsListening) == "function" and GS.IsListening() then
+        -- Hook stays installed. Warm-start only while our cache is still empty.
+        if type(GS.TryBootstrap) == "function" and type(GS.Count) == "function" and GS.Count() == 0 then
+            GS.TryBootstrap()
+        end
+        return
+    end
     if type(GS.Initialize) == "function" then
         GS.Initialize()
-    end
-    if type(GS.TryBootstrap) == "function" and type(GS.Count) == "function" and GS.Count() == 0 then
-        GS.TryBootstrap()
     end
 end
 
@@ -1344,6 +1506,14 @@ function SmartAssist.OnGroupUpdated()
     if m_enabled ~= true then
         return
     end
+    -- GROUP_UPDATED / BATTLEGROUP_UPDATED (and the other group events) drop
+    -- scoreboard rows for allies who left. Empty roster means the list is not
+    -- ready, so PruneToRoster leaves the cache alone.
+    local GS = GroupStats()
+    if GS ~= nil and type(GS.PruneToRoster) == "function" then
+        BuildAliveByKey()
+        GS.PruneToRoster(m_rosterKeys)
+    end
     MarkAssistDirty()
 end
 
@@ -1508,8 +1678,8 @@ function SmartAssist.Sync()
         ClearSticky()
         SetLastAssistName(nil)
         m_lastNotifyKey = nil
-        -- Prefer the cached slot, same as before, so a stale index is what Disable clears.
-        -- One name lookup: Delete uses m_macroSlot and does not scan again.
+        -- Cached index can point at a macro the player saved over ours.
+        -- Delete confirms the name is still EZAssist and rescans when it is not.
         local found = FindOwnedMacroSlot()
         if m_macroSlot == nil then
             m_macroSlot = found
