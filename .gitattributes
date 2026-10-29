@@ -1,0 +1,15 @@
+# Drop dev-only paths from git archive (tag source archives).
+# README.md and LICENSE stay. tools/ already covers tools/test-*.lua.
+tools/ export-ignore
+tools/** export-ignore
+.github/ export-ignore
+.github/** export-ignore
+.cursor/ export-ignore
+.cursor/** export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+CHANGELOG.md export-ignore
+test-* export-ignore
+*_test.lua export-ignore
+spec/ export-ignore
+spec/** export-ignore

@@ -94,6 +94,10 @@ jobs:
           lua5.1 tools/test-group-stats-wrap.lua
           lua5.1 tools/test-macro-slot.lua
 
+      - name: Addon zip verifier self-test
+        shell: bash
+        run: python3 tools/verify-addon-zip.py self-test
+
       - name: Pack addon zip
         id: pack
         shell: pwsh
@@ -113,6 +117,18 @@ jobs:
           fi
           cp -f "$ZIP" dist/EZAssist.zip
           test -s dist/EZAssist.zip
+
+      - name: Verify packed zips and source archive
+        shell: bash
+        env:
+          ZIP: ${{ steps.pack.outputs.zip_path }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify-addon-zip.py "$ZIP"
+          python3 tools/verify-addon-zip.py dist/EZAssist.zip
+          # CI guard only. Do not upload source-archive.zip.
+          git archive --format=zip --prefix=EZAssist/ -o dist/source-archive.zip HEAD
+          python3 tools/verify-addon-zip.py dist/source-archive.zip
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
