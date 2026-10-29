@@ -1258,7 +1258,7 @@ local function ForEachMacroActionButton(macroSlot, fn)
     end
 end
 
---- Manual friendly lock → Order gold (fury). Auto KD → Destruction green (waaagh).
+--- Manual friendly lock -> Order gold (fury). Auto KD -> Destruction green (waaagh).
 local function GlowTextureBase()
     if FriendlyAssistLocked() then
         return "anim_fury_"
