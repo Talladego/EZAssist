@@ -5,6 +5,7 @@
 - Party and warband assist no longer floods chat with errors when another addon is also tracking group combat
 - Allies who leave your party or warband are no longer kept as the assist target
 - EZAssist will not overwrite or delete a macro you saved in its previous slot
+- The "all macro slots are full" note only appears when every macro slot is actually taken
 
 ## 1.0.2 — 2026-10-28
 

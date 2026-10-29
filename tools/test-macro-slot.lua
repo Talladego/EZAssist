@@ -142,6 +142,118 @@ assertTrue(not wroteSlot(2), "disable called SetMacroData on the player's slot")
 assertEq(macros[3].name, "", "disable should clear the EZAssist macro it still owns")
 assertTrue(wroteSlot(3), "owned macro was not deleted")
 
+-- Cached index past the end of a short list must not error, and a real blank
+-- row in that list is still a usable slot.
+enableWith({
+    emptyRow(),
+    ownedRow(),
+})
+macros[2] = nil
+clearWrites()
+local ok, err = pcall(EZAssist.Sync)
+assertTrue(ok, "cached slot past a short list errored: " .. tostring(err))
+assertEq(macros[1].name, "EZAssist", "empty slot in a short list should still be claimed")
+assertTrue(wroteSlot(1), "short list did not claim the empty slot")
+assertTrue(not wroteSlot(2), "write used the stale slot past the end of the list")
+
+-- Cached index into an empty list must not error or invent a row.
+enableWith({
+    emptyRow(),
+    ownedRow(),
+})
+clearMacros()
+clearWrites()
+ok, err = pcall(EZAssist.Sync)
+assertTrue(ok, "empty macro list errored: " .. tostring(err))
+assertEq(macros[1], nil, "empty list should stay empty")
+assertTrue(not wroteSlot(1), "empty list wrote a macro")
+assertTrue(not wroteSlot(2), "empty list wrote the stale slot")
+
+-- A blank row in the cached slot is usable, same as before the nil guard.
+enableWith({
+    { name = "Mount", text = "/mount", iconNum = 4 },
+    ownedRow(),
+})
+macros[2] = emptyRow()
+clearWrites()
+ok, err = pcall(EZAssist.Sync)
+assertTrue(ok, "blank cached slot errored: " .. tostring(err))
+assertEq(macros[2].name, "EZAssist", "a blank cached slot should still be usable")
+assertTrue(wroteSlot(2), "blank cached slot was not written")
+assertEq(macros[1].name, "Mount", "blank-slot write touched another macro")
+
+local function printsFull(lines)
+    for i = 1, #lines do
+        if string.find(lines[i], "all macro slots are full", 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function withMacroSources(primary, secondary, fn)
+    local savedGet = GetMacrosData
+    local savedPrint = EZAssist.Print
+    local lines = {}
+    GetMacrosData = function()
+        return secondary
+    end
+    DataUtils = {
+        GetMacros = function()
+            return primary
+        end,
+    }
+    EZAssist.Print = function(msg)
+        lines[#lines + 1] = tostring(msg)
+    end
+    local ran, runErr = pcall(fn)
+    GetMacrosData = savedGet
+    DataUtils = nil
+    EZAssist.Print = savedPrint
+    if not ran then
+        fail("split macro lists errored: " .. tostring(runErr))
+    end
+    return lines
+end
+
+-- When the two macro lists disagree, do not claim every slot is full.
+clearWrites()
+local disagreePrints = withMacroSources(
+    {
+        { name = "Dance", text = "/dance", iconNum = 9 },
+        emptyRow(),
+    },
+    {
+        { name = "Mount", text = "/mount", iconNum = 4 },
+        { name = "Dance", text = "/dance", iconNum = 9 },
+    },
+    function()
+        EZAssist.Settings.enabled = true
+        EZAssist.Enable()
+    end
+)
+assertTrue(not printsFull(disagreePrints), "disagreement printed the full-slots warning")
+assertEq(#writes, 0, "disagreement wrote a macro")
+
+-- Both lists full still warns once and does not write.
+clearWrites()
+local fullPrints = withMacroSources(
+    {
+        { name = "Mount", text = "/mount", iconNum = 4 },
+        { name = "Dance", text = "/dance", iconNum = 9 },
+    },
+    {
+        { name = "Pet", text = "/pet", iconNum = 5 },
+        { name = "Sit", text = "/sit", iconNum = 6 },
+    },
+    function()
+        EZAssist.Settings.enabled = true
+        EZAssist.Enable()
+    end
+)
+assertTrue(printsFull(fullPrints), "full lists did not warn")
+assertEq(#writes, 0, "full lists wrote a macro")
+
 -- Departed members are removed on GROUP_UPDATED. An inactive roster must not wipe the cache.
 dofile("EZAssist_GroupStats.lua")
 json = {}

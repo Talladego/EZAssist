@@ -872,6 +872,13 @@ local function FindEmptyMacroSlot(macros)
     return nil
 end
 
+local function MacroListHasRoom(macros)
+    if type(macros) ~= "table" then
+        return false
+    end
+    return FindOwnedMacroSlot(macros) ~= nil or FindEmptyMacroSlot(macros) ~= nil
+end
+
 local function MacroRowIsEmpty(row)
     if type(row) ~= "table" then
         return false
@@ -890,7 +897,8 @@ local function MacroSlotOwnedOrEmpty(macros, slot)
     if MacroRowIsEmpty(row) then
         return true
     end
-    return IsOwnedMacroName(row.name)
+    -- A cached index past a short or empty list is not a blank slot.
+    return type(row) == "table" and IsOwnedMacroName(row.name)
 end
 
 local function MacroSlotIsOwned(macros, slot)
@@ -1166,7 +1174,11 @@ local function WriteMacro(assistName)
         or not MacroSlotOwnedOrEmpty(macros, slot)
         or not MacroSlotOwnedOrEmpty(confirm, slot)
     then
-        WarnMacroSlotsFull(confirm)
+        -- A mismatch is not "every slot is full" when either list still has room.
+        local sameList = confirm == macros
+        if sameList or (not MacroListHasRoom(macros) and not MacroListHasRoom(confirm)) then
+            WarnMacroSlotsFull(confirm)
+        end
         m_macroSlot = nil
         return false
     end
