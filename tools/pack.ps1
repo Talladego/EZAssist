@@ -78,7 +78,7 @@ foreach ($name in $RootFiles) {
 }
 
 $modText = Read-Utf8Text -Path $modPath
-# UiMod version= only — not VersionSettings gameVersion / windowsVersion / savedVariablesVersion.
+# UiMod version= only, not VersionSettings gameVersion / windowsVersion / savedVariablesVersion.
 if ($modText -notmatch '<UiMod\b[^>]*\bversion="([^"]+)"') {
     throw "Could not read UiMod version= from EZAssist.mod"
 }

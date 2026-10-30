@@ -35,9 +35,11 @@ def require_semver(version: str) -> str:
 
 
 def header_pattern(version: str) -> re.Pattern[str]:
-    # Optional dated suffix: " — YYYY-MM-DD", "-- YYYY-MM-DD", or "- YYYY-MM-DD".
+    # Optional dated suffix: em dash, "--", or "-" plus the date.
     return re.compile(
-        rf"^##\s+{re.escape(version)}(?:\s+(?:—|--|-)\s+\S.*)?$"
+        "^##\\s+"
+        + re.escape(version)
+        + "(?:\\s+(?:\u2014|--|-)\\s+\\S.*)?$"
     )
 
 

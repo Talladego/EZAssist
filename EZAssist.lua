@@ -7,7 +7,7 @@
 
 EZAssist = EZAssist or {}
 EZAssist.Settings = EZAssist.Settings or {}
-EZAssist.VERSION = "1.0.2"
+EZAssist.VERSION = "1.0.3"
 
 -- Yellow/orange [EZAssist] chat tag; data=EZA: opens config on click.
 local c_CHAT_PREFIX_TEXT = "EZAssist"
@@ -108,13 +108,37 @@ end
 local function PrintHelp()
     EZAssist.Print(L"v" .. towstring(EZAssist.VERSION) .. L" - KD>DB>TD assist macro")
     EZAssist.Print(L"/ezassist or /ezass - open config")
-    EZAssist.Print(L"/eza on|off - enable / disable (creates or deletes the EZAssist macro)")
+    EZAssist.Print(L"/eza on|off - enable / disable (keeps the EZAssist macro; clears /assist text when off)")
     EZAssist.Print(L"/eza range <1-500> - assist range in feet (default 65)")
     EZAssist.Print(L"/eza clearhostile on|off - clear macro while you have a living hostile")
-    EZAssist.Print(L"/eza glow on|off - glow when a new assist is available")
+    EZAssist.Print(L"/eza glow on|off - glow while the macro has a target")
     EZAssist.Print(L"/eza notify on|off - chat when the assist target changes")
     EZAssist.Print(L"/eza status - diagnostic snapshot")
     EZAssist.Print(L"Bind the EZAssist macro and press it yourself (RoR ignores /assist from addons).")
+end
+
+-- Lua string, or nil. Nil, "", and L"" never reach WStringToString.
+-- The client logs Invalid Parameters for those calls even when the result is "".
+local function WStringToNarrow(value)
+    if value == nil or value == "" or value == L"" then
+        return nil
+    end
+    local kind = type(value)
+    if kind == "string" then
+        return value
+    end
+    if kind ~= "wstring" or type(WStringToString) ~= "function" then
+        local s = tostring(value)
+        if s == nil or s == "" then
+            return nil
+        end
+        return s
+    end
+    local ok, text = pcall(WStringToString, value)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
 end
 
 local function ParseOnOff(arg)
@@ -122,8 +146,8 @@ local function ParseOnOff(arg)
         return nil
     end
     local s = arg
-    if type(s) == "wstring" and type(WStringToString) == "function" then
-        s = WStringToString(s)
+    if type(s) == "wstring" then
+        s = WStringToNarrow(s)
     end
     s = string.lower(tostring(s or ""))
     if s == "on" or s == "1" or s == "true" or s == "enable" or s == "enabled" then
@@ -163,8 +187,8 @@ end
 
 function EZAssist.Slash(input)
     local text = input
-    if type(text) == "wstring" and type(WStringToString) == "function" then
-        text = WStringToString(text)
+    if type(text) == "wstring" then
+        text = WStringToNarrow(text)
     end
     text = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if text == "" then
@@ -191,7 +215,7 @@ function EZAssist.Slash(input)
     end
     if cmd == "off" or cmd == "disable" then
         EZAssist.Disable()
-        EZAssist.Print(L"disabled (macro removed)")
+        EZAssist.Print(L"disabled")
         return
     end
     if cmd == "range" then
@@ -228,8 +252,9 @@ function EZAssist.Slash(input)
         end
         local st = EZAssist.DebugStatus()
         local pick = st.pick
-        if type(pick) == "wstring" and type(WStringToString) == "function" then
-            pick = WStringToString(pick)
+        if type(pick) == "wstring" then
+            local narrowed = WStringToNarrow(pick)
+            pick = narrowed ~= nil and narrowed or ""
         end
         EZAssist.Print(
             L"en="

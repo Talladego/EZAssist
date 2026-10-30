@@ -1,7 +1,7 @@
 ----------------------------------------------------------------
 -- EZAssist.GroupStats
 -- Open-world party/warband combat scoreboard via GRP_STATS chat packets
--- (same source RoRGroupScoreboard uses). Independent cache — does not read
+-- (same source RoRGroupScoreboard uses). Independent cache - does not read
 -- or require RoRGroupScoreboard.
 ----------------------------------------------------------------
 
@@ -17,26 +17,52 @@ local m_rpExclusiveWrap = nil
 local m_rpWrapTable = nil
 local m_rpWrapKey = nil
 local m_rpWrapOrig = nil
+local m_rpWrapFn = nil
+-- Bumped on Shutdown so an orphaned wrapper (a later addon still calling it)
+-- stops delivering packets after we unhook.
+local m_hookGen = 0
 local m_byCharId = {} -- [charId] = row
 
+-- Lua string, or nil. Nil, "", and L"" never reach WStringToString.
+-- The client logs Invalid Parameters for those calls even when the result is "".
+local function WStringToNarrow(value)
+    if value == nil or value == "" or value == L"" then
+        return nil
+    end
+    local kind = type(value)
+    if kind == "string" then
+        return value
+    end
+    if kind ~= "wstring" or type(WStringToString) ~= "function" then
+        local s = tostring(value)
+        if s == nil or s == "" then
+            return nil
+        end
+        return s
+    end
+    local ok, text = pcall(WStringToString, value)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 local function NormalizeNameKey(name)
-    if name == nil then
+    if name == nil or name == "" or name == L"" then
         return nil
     end
     local s = name
-    if type(s) == "wstring" then
-        if type(WStringsRemoveGrammar) == "function" then
-            s = WStringsRemoveGrammar(s)
+    if type(s) == "wstring" and type(WStringsRemoveGrammar) == "function" then
+        local ok, stripped = pcall(WStringsRemoveGrammar, s)
+        if ok then
+            if stripped == nil or stripped == "" or stripped == L"" then
+                return nil
+            end
+            s = stripped
         end
-        if type(WStringToString) == "function" then
-            s = WStringToString(s)
-        else
-            s = tostring(s)
-        end
-    elseif type(s) ~= "string" then
-        s = tostring(s)
     end
-    if s == nil or s == "" then
+    s = WStringToNarrow(s)
+    if type(s) ~= "string" or s == "" then
         return nil
     end
     local caret = string.find(s, "^", 1, true)
@@ -156,6 +182,28 @@ function GroupStats.Clear()
     m_byCharId = {}
 end
 
+--- Drop rows whose normalized name is not in the current group/warband.
+--- rosterKeys: [nameKey] = present (any non-nil value, including false).
+--- Nil or empty means the roster is not ready; the cache is left alone.
+--- Does not allocate.
+function GroupStats.PruneToRoster(rosterKeys)
+    if type(rosterKeys) ~= "table" or next(rosterKeys) == nil then
+        return 0
+    end
+    local removed = 0
+    for charId, row in pairs(m_byCharId) do
+        local key = nil
+        if type(row) == "table" then
+            key = row.key
+        end
+        if key == nil or rosterKeys[key] == nil then
+            m_byCharId[charId] = nil
+            removed = removed + 1
+        end
+    end
+    return removed
+end
+
 function GroupStats.Count()
     local n = 0
     for _ in pairs(m_byCharId) do
@@ -176,7 +224,7 @@ function GroupStats.GetRowByKey(key)
     return nil
 end
 
---- Best party/warband ally by KillDamage → Deathblows → Total Damage.
+--- Best party/warband ally by KillDamage -> Deathblows -> Total Damage.
 --- opts.normalizeNameKey, opts.excludeKey, opts.requireCombatData (default true),
 --- opts.accept(key, row) -> bool.
 function GroupStats.PickBestAssistCandidate(opts)
@@ -301,6 +349,25 @@ function GroupStats.TryBootstrap()
     return added
 end
 
+--- One wrapper. prev is fixed in this closure (never a shared upvalue).
+--- hookGen ignores the call after Shutdown so a successor that still holds
+--- this function cannot deliver a second OnPacket.
+local function MakeRpWrap(prev)
+    local gen = m_hookGen
+    return function(text)
+        if type(prev) == "function" then
+            prev(text)
+        end
+        if gen == m_hookGen then
+            GroupStats.OnPacket(text)
+        end
+    end
+end
+
+local function RpHookInstalled()
+    return m_directCallback ~= nil or m_rpExclusiveWrap ~= nil or m_rpWrapFn ~= nil
+end
+
 local function EnsureRpListening()
     if type(ror_PacketHandling) ~= "table" then
         return false
@@ -310,49 +377,42 @@ local function EnsureRpListening()
         return false
     end
 
-    local existing = RP["GRP_STATS"]
-
-    -- Already chained on exclusive (function) builds.
-    if m_rpExclusiveWrap ~= nil and existing == m_rpExclusiveWrap then
+    -- At most one wrap per path. A later refresh must not wrap our own wrapper
+    -- or a foreign successor that already calls us (that grows one frame per
+    -- tick until GRP_STATS overflows).
+    if RpHookInstalled() then
         return true
     end
 
+    local existing = RP["GRP_STATS"]
+
     -- Live RoR builds often store a single function (not a list). Chain it.
     if type(existing) == "function" then
-        if existing == GroupStats.OnPacket or existing == m_rpExclusiveWrap then
+        if existing == GroupStats.OnPacket then
             return true
         end
-        m_rpExclusiveOrig = existing
-        m_rpExclusiveWrap = function(text)
-            local fn = m_rpExclusiveOrig
-            if type(fn) == "function" then
-                fn(text)
-            end
-            GroupStats.OnPacket(text)
-        end
+        local prev = existing
+        m_rpExclusiveOrig = prev
+        m_rpExclusiveWrap = MakeRpWrap(prev)
         RP["GRP_STATS"] = m_rpExclusiveWrap
         return true
     end
 
     -- Multi-callback list builds (VinyUI-style Register).
     if type(existing) == "table" then
-        if m_directCallback ~= nil then
-            return true
-        end
         for key, fn in pairs(existing) do
             if type(fn) == "function" and fn ~= GroupStats.OnPacket then
+                local prev = fn
                 m_rpWrapTable = existing
                 m_rpWrapKey = key
-                m_rpWrapOrig = fn
-                existing[key] = function(text)
-                    m_rpWrapOrig(text)
-                    GroupStats.OnPacket(text)
-                end
+                m_rpWrapOrig = prev
+                m_rpWrapFn = MakeRpWrap(prev)
+                existing[key] = m_rpWrapFn
                 return true
             end
         end
         if type(ror_PacketHandling.Register) == "function" then
-            m_directCallback = GroupStats.OnPacket
+            m_directCallback = MakeRpWrap(nil)
             ror_PacketHandling.Register("GRP_STATS", m_directCallback)
             return true
         end
@@ -360,17 +420,24 @@ local function EnsureRpListening()
     end
 
     if type(ror_PacketHandling.Register) == "function" then
-        m_directCallback = GroupStats.OnPacket
+        m_directCallback = MakeRpWrap(nil)
         ror_PacketHandling.Register("GRP_STATS", m_directCallback)
         return true
     end
     return false
 end
 
+-- Harness entry. RefreshAssist goes through Initialize; tests call this in a loop.
+GroupStats.EnsureRpListening = EnsureRpListening
+
 --- Listen for GRP_STATS into our own cache.
 --- Important: exclusive ror_PacketHandling keeps the registered function in RP[phrase];
 --- replacing RoRGroupScoreboard.Packet alone does not receive packets.
 function GroupStats.Initialize()
+    -- RefreshAssist used to call this every 0.5s. Once the hook is up, do nothing.
+    if m_active == true then
+        return
+    end
     if EnsureRpListening() then
         m_active = true
     end
@@ -378,22 +445,30 @@ function GroupStats.Initialize()
 end
 
 function GroupStats.Shutdown()
+    -- Retire every wrapper we installed, including ones a later addon still calls.
+    m_hookGen = m_hookGen + 1
+    m_active = false
+
     if m_directCallback ~= nil
         and type(ror_PacketHandling) == "table"
         and type(ror_PacketHandling.Unregister) == "function"
     then
         ror_PacketHandling.Unregister("GRP_STATS", m_directCallback)
-        m_directCallback = nil
     end
+    m_directCallback = nil
 
-    if m_rpWrapTable ~= nil and m_rpWrapKey ~= nil and m_rpWrapOrig ~= nil
-        and m_rpWrapTable[m_rpWrapKey] ~= nil
+    -- Restore only while our wrapper is still the slot. A foreign successor
+    -- that replaced it must stay; the gen bump above silences our old wrap.
+    if m_rpWrapTable ~= nil and m_rpWrapKey ~= nil and type(m_rpWrapOrig) == "function"
+        and m_rpWrapFn ~= nil
+        and m_rpWrapTable[m_rpWrapKey] == m_rpWrapFn
     then
         m_rpWrapTable[m_rpWrapKey] = m_rpWrapOrig
     end
     m_rpWrapTable = nil
     m_rpWrapKey = nil
     m_rpWrapOrig = nil
+    m_rpWrapFn = nil
 
     if m_rpExclusiveWrap ~= nil
         and type(ror_PacketHandling) == "table"
@@ -406,6 +481,5 @@ function GroupStats.Shutdown()
     m_rpExclusiveWrap = nil
     m_rpExclusiveOrig = nil
 
-    m_active = false
     GroupStats.Clear()
 end

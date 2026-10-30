@@ -7,7 +7,7 @@
 
     <Window name="EZAssistConfig" movable="true" savesettings="false" layer="secondary">
       <Size>
-        <AbsPoint x="540" y="520" />
+        <AbsPoint x="540" y="620" />
       </Size>
       <Anchors>
         <Anchor point="center" relativePoint="center" />
@@ -57,7 +57,7 @@
 
             <Window name="$parentScrollChild">
               <Size>
-                <AbsPoint x="480" y="400" />
+                <AbsPoint x="480" y="500" />
               </Size>
               <Anchors>
                 <Anchor point="topleft" relativePoint="topleft">
@@ -71,7 +71,7 @@
 
                 <Window name="$parentSettings">
                   <Size>
-                    <AbsPoint x="480" y="380" />
+                    <AbsPoint x="480" y="500" />
                   </Size>
                   <Anchors>
                     <Anchor point="topleft" relativePoint="topleft">
@@ -97,7 +97,7 @@
                     <Window name="$parentEnabled" inherits="EA_LabelCheckButtonWide">
                       <Anchors>
                         <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="45" y="40" />
+                          <AbsPoint x="20" y="42" />
                         </Anchor>
                       </Anchors>
                       <EventHandlers>
@@ -106,48 +106,24 @@
                       </EventHandlers>
                     </Window>
 
-                    <Label name="$parentInfo" font="font_default_text_small" wordwrap="true" textalign="left" maxchars="512">
+                    <Label name="$parentInfo" font="font_default_text_small" wordwrap="true" textalign="left" maxchars="1024">
                       <Size>
-                        <AbsPoint x="410" y="70" />
+                        <AbsPoint x="420" y="290" />
                       </Size>
                       <Anchors>
                         <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="45" y="72" />
+                          <AbsPoint x="20" y="78" />
                         </Anchor>
                       </Anchors>
                     </Label>
 
-                    <Window name="$parentClearHostile" inherits="EA_LabelCheckButtonWide">
-                      <Anchors>
-                        <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="45" y="150" />
-                        </Anchor>
-                      </Anchors>
-                      <EventHandlers>
-                        <EventHandler event="OnInitialize" function="EA_LabelCheckButton.Initialize" />
-                        <EventHandler event="OnLButtonUp" function="EZAssistConfig.OnToggleClearHostile" />
-                      </EventHandlers>
-                    </Window>
-
-                    <Window name="$parentGlow" inherits="EA_LabelCheckButtonWide">
-                      <Anchors>
-                        <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="45" y="186" />
-                        </Anchor>
-                      </Anchors>
-                      <EventHandlers>
-                        <EventHandler event="OnInitialize" function="EA_LabelCheckButton.Initialize" />
-                        <EventHandler event="OnLButtonUp" function="EZAssistConfig.OnToggleGlow" />
-                      </EventHandlers>
-                    </Window>
-
                     <Label name="$parentRangeLabel" font="font_default_text" textalign="left" maxchars="64">
                       <Size>
-                        <AbsPoint x="200" y="24" />
+                        <AbsPoint x="280" y="24" />
                       </Size>
                       <Anchors>
                         <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="45" y="228" />
+                          <AbsPoint x="20" y="382" />
                         </Anchor>
                       </Anchors>
                     </Label>
@@ -157,15 +133,27 @@
                       </Size>
                       <Anchors>
                         <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="250" y="224" />
+                          <AbsPoint x="310" y="378" />
                         </Anchor>
                       </Anchors>
                     </EditBox>
 
+                    <Window name="$parentClearHostile" inherits="EA_LabelCheckButtonWide">
+                      <Anchors>
+                        <Anchor point="topleft" relativePoint="topleft">
+                          <AbsPoint x="20" y="426" />
+                        </Anchor>
+                      </Anchors>
+                      <EventHandlers>
+                        <EventHandler event="OnInitialize" function="EA_LabelCheckButton.Initialize" />
+                        <EventHandler event="OnLButtonUp" function="EZAssistConfig.OnToggleClearHostile" />
+                      </EventHandlers>
+                    </Window>
+
                     <Window name="$parentNotify" inherits="EA_LabelCheckButtonWide">
                       <Anchors>
                         <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="45" y="268" />
+                          <AbsPoint x="20" y="462" />
                         </Anchor>
                       </Anchors>
                       <EventHandlers>
@@ -173,17 +161,6 @@
                         <EventHandler event="OnLButtonUp" function="EZAssistConfig.OnToggleNotify" />
                       </EventHandlers>
                     </Window>
-
-                    <Label name="$parentNotifyInfo" font="font_default_text_small" wordwrap="true" textalign="left" maxchars="256">
-                      <Size>
-                        <AbsPoint x="410" y="40" />
-                      </Size>
-                      <Anchors>
-                        <Anchor point="topleft" relativePoint="topleft">
-                          <AbsPoint x="45" y="304" />
-                        </Anchor>
-                      </Anchors>
-                    </Label>
                   </Windows>
                 </Window>
 

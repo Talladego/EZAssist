@@ -1,6 +1,6 @@
 ----------------------------------------------------------------
 -- EZAssistConfig
--- Minimal settings window: enable, clear-on-hostile, glow, range, notify.
+-- Settings: range, clear-on-hostile, notify.
 ----------------------------------------------------------------
 
 EZAssistConfig = {}
@@ -26,27 +26,49 @@ local function EnsureSettings()
     return EZAssist.Settings
 end
 
+-- Lua string, or nil. Nil, "", and L"" never reach WStringToString.
+-- The client logs Invalid Parameters for those calls even when the result is "".
+local function WStringToNarrow(value)
+    if value == nil or value == "" or value == L"" then
+        return nil
+    end
+    local kind = type(value)
+    if kind == "string" then
+        return value
+    end
+    if kind ~= "wstring" or type(WStringToString) ~= "function" then
+        local s = tostring(value)
+        if s == nil or s == "" then
+            return nil
+        end
+        return s
+    end
+    local ok, text = pcall(WStringToString, value)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 function EZAssistConfig.Initialize()
     local c = c_CONTENTS
-    local VERSION = (EZAssist and EZAssist.VERSION) or "1.0.2"
+    local VERSION = (EZAssist and EZAssist.VERSION) or "1.0.3"
     LabelSetText(c_WIN .. "TitleBarText", L"EZAssist v" .. towstring(VERSION))
     LabelSetText(c .. "Title", L"EZAssist")
     LabelSetText(c .. "EnabledLabel", L"Enable EZAssist")
     LabelSetText(
         c .. "Info",
-        L"Hotbar macro <icon23166> assists the best nearby ally (KillDamage, then Deathblows, then Total Damage). Scenarios and party/warband. Never assists yourself - bind and press the macro yourself."
+        L"- Creates a hotbar macro <icon23166> for /assist.\n\n"
+            .. L"- Select a friendly player and click the macro to set that player as your target assist.\n\n"
+            .. L"- Clicking the macro then assists that player (party, warband, or scenario only - the client ignores /assist otherwise).\n\n"
+            .. L"- Select yourself and click the macro to clear a selected assist player and revert to auto selection.\n\n"
+            .. L"- With no selected player as assist the macro automatically selects the top damage player in the Warband, Party or Scenario within range based on Kill Damage, Deathblows or Total Damage."
     )
-    LabelSetText(c .. "ClearHostileLabel", L"Clear while having a hostile target")
-    LabelSetText(c .. "GlowLabel", L"Glow on new assist available")
-    LabelSetText(c .. "RangeLabel", L"Assist range (ft)")
-    LabelSetText(c .. "NotifyLabel", L"Chat when assist target changes")
-    LabelSetText(
-        c .. "NotifyInfo",
-        L"System chat line with reason + KD / DB / Damage when the pick changes."
-    )
+    LabelSetText(c .. "RangeLabel", L"Auto assist selection range (ft)")
+    LabelSetText(c .. "ClearHostileLabel", L"Clear assist macro on hostile player")
+    LabelSetText(c .. "NotifyLabel", L"Chat notifications")
     ButtonSetCheckButtonFlag(c .. "EnabledButton", true)
     ButtonSetCheckButtonFlag(c .. "ClearHostileButton", true)
-    ButtonSetCheckButtonFlag(c .. "GlowButton", true)
     ButtonSetCheckButtonFlag(c .. "NotifyButton", true)
     ButtonSetText(c_WIN .. "OkayButton", L"Okay")
     ButtonSetText(c_WIN .. "ApplyButton", L"Apply")
@@ -58,7 +80,6 @@ function EZAssistConfig.UpdateFromSettings()
     local s = EnsureSettings()
     ButtonSetPressedFlag(c .. "EnabledButton", s.enabled == true)
     ButtonSetPressedFlag(c .. "ClearHostileButton", s.clearOnHostile == true)
-    ButtonSetPressedFlag(c .. "GlowButton", s.glowOnNewAssist ~= false)
     ButtonSetPressedFlag(c .. "NotifyButton", s.notify == true)
     if DoesWindowExist(c .. "RangeEdit") then
         TextEditBoxSetText(c .. "RangeEdit", towstring(tostring(ClampRange(s.range))))
@@ -73,13 +94,13 @@ function EZAssistConfig.ApplyCurrent()
     local s = EnsureSettings()
     s.enabled = ButtonGetPressedFlag(c .. "EnabledButton") == true
     s.clearOnHostile = ButtonGetPressedFlag(c .. "ClearHostileButton") == true
-    s.glowOnNewAssist = ButtonGetPressedFlag(c .. "GlowButton") == true
+    s.preferFriendlyTarget = true
     s.notify = ButtonGetPressedFlag(c .. "NotifyButton") == true
     if DoesWindowExist(c .. "RangeEdit") then
         local text = TextEditBoxGetText(c .. "RangeEdit")
         local asString = text
-        if type(text) == "wstring" and type(WStringToString) == "function" then
-            asString = WStringToString(text)
+        if type(text) == "wstring" then
+            asString = WStringToNarrow(text)
         end
         s.range = ClampRange(tonumber(asString) or s.range)
     end
@@ -133,10 +154,6 @@ function EZAssistConfig.OnToggleEnabled()
 end
 
 function EZAssistConfig.OnToggleClearHostile()
-    EA_LabelCheckButton.Toggle()
-end
-
-function EZAssistConfig.OnToggleGlow()
     EA_LabelCheckButton.Toggle()
 end
 

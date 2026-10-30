@@ -1,16 +1,18 @@
 # EZAssist
 
-Standalone Return of Reckoning addon: one managed hotbar macro `/assist <player>` for the best nearby ally by **KillDamage → Deathblows → Total Damage**.
+Standalone Return of Reckoning addon: one managed hotbar macro `/assist <player>`.
+
+**Friendly lock** (default): press the macro while targeting an ally to lock them; target yourself and press to clear. The lock also clears when that ally leaves your party or warband. **Auto KD** (fallback): with no lock, scenarios / party / warband pick by KillDamage -> Deathblows -> Total Damage.
 
 Extracted from [CustomUI](https://github.com/Talladego/CustomUIv3) SmartAssist. Do **not** run both at once.
 
 ## Features
 
-- Scenarios (scoreboard) and party/warband (`GRP_STATS`; no RoRGroupScoreboard)
-- Range filter, sticky pick, optional clear while you have a living hostile
-- Always-active icon (`23166`); burn glow on a new unacked pick, cleared after you press the macro (deferred, safe for `/assist`)
-- Config window: `/ezassist`, `/ezass`, `/eza`, or click the yellow/orange **[EZAssist]** System chat tag
-- You must bind and press the macro yourself (RoR ignores `/assist` from addon Lua)
+- Friendly lock + Auto KD fallback (scenarios / party / warband via scoreboard / `GRP_STATS`)
+- Range filter, sticky pick, optional clear while you have a living hostile player
+- Always-active icon (`23166`). Order gold glow for manual lock, Destruction green for Auto KD (brighter for a new target). No glow checkbox; `/eza glow` still turns the glow on or off
+- Config: `/ezassist`, `/ezass`, `/eza`, or click the yellow/orange **[EZAssist]** System chat tag
+- Bind and press the macro yourself (RoR ignores `/assist` from addon Lua)
 
 ## Install
 
@@ -27,7 +29,7 @@ Extracted from [CustomUI](https://github.com/Talladego/CustomUIv3) SmartAssist. 
 | `/eza on` / `off` | Enable / disable |
 | `/eza range <1-500>` | Assist range (ft) |
 | `/eza clearhostile on\|off` | Clear macro while hostile targeted |
-| `/eza glow on\|off` | Glow on new assist available |
+| `/eza glow on\|off` | Glow while the macro has a target |
 | `/eza notify on\|off` | Chat when pick changes |
 | `/eza status` | Diagnostics |
 
