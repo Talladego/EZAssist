@@ -21,14 +21,15 @@ local function assertTrue(cond, msg)
     end
 end
 
-local function rewriteController(dest)
-    local inp = io.open("EZAssist_Controller.lua", "r")
+local function rewriteLua(src, dest)
+    local inp = io.open(src, "r")
     if inp == nil then
-        fail("could not read EZAssist_Controller.lua (run from the repo root)")
+        fail("could not read " .. src .. " (run from the repo root)")
         os.exit(1)
     end
     local text = inp:read("*a")
     inp:close()
+    -- WAR wstring literals (L"...") are not valid Lua 5.1.
     text = text:gsub('L"([^"]*)"', '"%1"')
     local out = io.open(dest, "w")
     out:write(text)
@@ -98,7 +99,7 @@ local function wroteSlot(slot)
 end
 
 local rewritten = "/tmp/ezassist-controller-rewritten.lua"
-rewriteController(rewritten)
+rewriteLua("EZAssist_Controller.lua", rewritten)
 dofile(rewritten)
 os.remove(rewritten)
 
@@ -283,7 +284,10 @@ assertTrue(printsFull(fullPrints), "full lists did not warn")
 assertEq(#writes, 0, "full lists wrote a macro")
 
 -- Departed members are removed on GROUP_UPDATED. An inactive roster must not wipe the cache.
-dofile("EZAssist_GroupStats.lua")
+local groupRewritten = "/tmp/ezassist-group-stats-rewritten.lua"
+rewriteLua("EZAssist_GroupStats.lua", groupRewritten)
+dofile(groupRewritten)
+os.remove(groupRewritten)
 json = {}
 function json.decode(text)
     local id = tonumber(string.match(text, '"characterId":(%d+)'))

@@ -93,6 +93,7 @@ jobs:
           done
           lua5.1 tools/test-group-stats-wrap.lua
           lua5.1 tools/test-macro-slot.lua
+          lua5.1 tools/test-wstring-narrow.lua
 
       - name: Addon zip verifier self-test
         shell: bash

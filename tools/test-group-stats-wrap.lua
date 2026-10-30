@@ -25,7 +25,29 @@ function towstring(value)
     return value
 end
 
-dofile("EZAssist_GroupStats.lua")
+local function loadAddonLua(path)
+    local inp = io.open(path, "r")
+    if inp == nil then
+        fail("could not read " .. path .. " (run from the repo root)")
+        os.exit(1)
+    end
+    local text = inp:read("*a")
+    inp:close()
+    -- WAR wstring literals (L"...") are not valid Lua 5.1.
+    text = text:gsub('L"([^"]*)"', '"%1"')
+    local dest = os.tmpname()
+    local out = io.open(dest, "w")
+    if out == nil then
+        fail("could not write " .. dest)
+        os.exit(1)
+    end
+    out:write(text)
+    out:close()
+    dofile(dest)
+    os.remove(dest)
+end
+
+loadAddonLua("EZAssist_GroupStats.lua")
 
 local GS = EZAssist.GroupStats
 local calls = 0

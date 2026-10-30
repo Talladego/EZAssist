@@ -23,24 +23,46 @@ local m_rpWrapFn = nil
 local m_hookGen = 0
 local m_byCharId = {} -- [charId] = row
 
+-- Lua string, or nil. Nil, "", and L"" never reach WStringToString.
+-- The client logs Invalid Parameters for those calls even when the result is "".
+local function WStringToNarrow(value)
+    if value == nil or value == "" or value == L"" then
+        return nil
+    end
+    local kind = type(value)
+    if kind == "string" then
+        return value
+    end
+    if kind ~= "wstring" or type(WStringToString) ~= "function" then
+        local s = tostring(value)
+        if s == nil or s == "" then
+            return nil
+        end
+        return s
+    end
+    local ok, text = pcall(WStringToString, value)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 local function NormalizeNameKey(name)
-    if name == nil then
+    if name == nil or name == "" or name == L"" then
         return nil
     end
     local s = name
-    if type(s) == "wstring" then
-        if type(WStringsRemoveGrammar) == "function" then
-            s = WStringsRemoveGrammar(s)
+    if type(s) == "wstring" and type(WStringsRemoveGrammar) == "function" then
+        local ok, stripped = pcall(WStringsRemoveGrammar, s)
+        if ok then
+            if stripped == nil or stripped == "" or stripped == L"" then
+                return nil
+            end
+            s = stripped
         end
-        if type(WStringToString) == "function" then
-            s = WStringToString(s)
-        else
-            s = tostring(s)
-        end
-    elseif type(s) ~= "string" then
-        s = tostring(s)
     end
-    if s == nil or s == "" then
+    s = WStringToNarrow(s)
+    if type(s) ~= "string" or s == "" then
         return nil
     end
     local caret = string.find(s, "^", 1, true)
