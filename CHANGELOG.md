@@ -16,6 +16,7 @@
 - Macro glow is gold while you've locked an ally and green while Auto KD picks the target.
 - A locked ally is cleared when they leave your party or warband
 - Performance improvements.
+- EZAssist no longer spams the UI error log.
 
 ## 1.0.2 - 2026-10-28
 

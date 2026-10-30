@@ -117,13 +117,37 @@ local function PrintHelp()
     EZAssist.Print(L"Bind the EZAssist macro and press it yourself (RoR ignores /assist from addons).")
 end
 
+-- Lua string, or nil. Nil, "", and L"" never reach WStringToString.
+-- The client logs Invalid Parameters for those calls even when the result is "".
+local function WStringToNarrow(value)
+    if value == nil or value == "" or value == L"" then
+        return nil
+    end
+    local kind = type(value)
+    if kind == "string" then
+        return value
+    end
+    if kind ~= "wstring" or type(WStringToString) ~= "function" then
+        local s = tostring(value)
+        if s == nil or s == "" then
+            return nil
+        end
+        return s
+    end
+    local ok, text = pcall(WStringToString, value)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 local function ParseOnOff(arg)
     if arg == nil then
         return nil
     end
     local s = arg
-    if type(s) == "wstring" and type(WStringToString) == "function" then
-        s = WStringToString(s)
+    if type(s) == "wstring" then
+        s = WStringToNarrow(s)
     end
     s = string.lower(tostring(s or ""))
     if s == "on" or s == "1" or s == "true" or s == "enable" or s == "enabled" then
@@ -163,8 +187,8 @@ end
 
 function EZAssist.Slash(input)
     local text = input
-    if type(text) == "wstring" and type(WStringToString) == "function" then
-        text = WStringToString(text)
+    if type(text) == "wstring" then
+        text = WStringToNarrow(text)
     end
     text = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if text == "" then
@@ -228,8 +252,9 @@ function EZAssist.Slash(input)
         end
         local st = EZAssist.DebugStatus()
         local pick = st.pick
-        if type(pick) == "wstring" and type(WStringToString) == "function" then
-            pick = WStringToString(pick)
+        if type(pick) == "wstring" then
+            local narrowed = WStringToNarrow(pick)
+            pick = narrowed ~= nil and narrowed or ""
         end
         EZAssist.Print(
             L"en="

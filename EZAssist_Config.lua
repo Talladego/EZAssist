@@ -26,6 +26,30 @@ local function EnsureSettings()
     return EZAssist.Settings
 end
 
+-- Lua string, or nil. Nil, "", and L"" never reach WStringToString.
+-- The client logs Invalid Parameters for those calls even when the result is "".
+local function WStringToNarrow(value)
+    if value == nil or value == "" or value == L"" then
+        return nil
+    end
+    local kind = type(value)
+    if kind == "string" then
+        return value
+    end
+    if kind ~= "wstring" or type(WStringToString) ~= "function" then
+        local s = tostring(value)
+        if s == nil or s == "" then
+            return nil
+        end
+        return s
+    end
+    local ok, text = pcall(WStringToString, value)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 function EZAssistConfig.Initialize()
     local c = c_CONTENTS
     local VERSION = (EZAssist and EZAssist.VERSION) or "1.0.3"
@@ -75,8 +99,8 @@ function EZAssistConfig.ApplyCurrent()
     if DoesWindowExist(c .. "RangeEdit") then
         local text = TextEditBoxGetText(c .. "RangeEdit")
         local asString = text
-        if type(text) == "wstring" and type(WStringToString) == "function" then
-            asString = WStringToString(text)
+        if type(text) == "wstring" then
+            asString = WStringToNarrow(text)
         end
         s.range = ClampRange(tonumber(asString) or s.range)
     end
